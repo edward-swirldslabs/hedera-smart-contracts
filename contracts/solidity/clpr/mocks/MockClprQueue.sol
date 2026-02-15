@@ -147,6 +147,11 @@ contract MockClprQueue is IClprQueue {
         pending = _pendingResponses[originalMessageId].originalMessageId != 0;
     }
 
+    /// @notice Returns middleware route-header bytes from a pending response, if present.
+    function pendingResponseRouteData(uint64 originalMessageId) external view returns (bytes memory routeData) {
+        routeData = _pendingResponses[originalMessageId].middlewareResponse.middlewareMessage.data;
+    }
+
     function _storeMessageResponse(ClprTypes.ClprMessageResponse memory response) private returns (uint64 responseId) {
         if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
         if (_pendingResponses[response.originalMessageId].originalMessageId != 0) revert ResponseAlreadyPending();

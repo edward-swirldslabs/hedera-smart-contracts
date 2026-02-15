@@ -23,6 +23,8 @@ import { IClprConnector } from "../interfaces/IClprConnector.sol";
 ///      - balance report propagation (source->dest and dest->source), and
 ///      - out-of-funds pre-enqueue rejection based on the latest known remote status.
 contract ClprMiddleware is IClprMiddleware {
+    uint8 private constant ROUTE_VERSION = 1;
+
     /// @notice Stored routing context for a message awaiting response delivery.
     struct PendingOutboundMessage {
         address sourceApplication;
@@ -38,6 +40,7 @@ contract ClprMiddleware is IClprMiddleware {
         address connectorAddress;
         bytes32 remoteLedgerId;
         bytes32 expectedRemoteConnectorId;
+        address remoteMiddleware;
         address admin;
         bool enabled;
         bool exists;
@@ -79,11 +82,26 @@ contract ClprMiddleware is IClprMiddleware {
     /// @notice Thrown when attempting to register a connector with an invalid admin.
     error InvalidAdmin();
 
+    /// @notice Thrown when attempting to configure an invalid remote middleware address.
+    error InvalidRemoteMiddleware();
+
+    /// @notice Thrown when a non-owner attempts an owner-only operation.
+    error OwnerOnly();
+
+    /// @notice Thrown when a request route header cannot be decoded or validated.
+    error InvalidRouteHeader();
+
     /// @notice Address of the messaging-layer queue mock used for enqueue and callbacks.
     address public immutable queue;
 
+    /// @notice Deployer-owned admin role for middleware-level configuration.
+    address public immutable owner;
+
     /// @notice Opaque ledger id (used only for connector identity derivation in the spec).
     bytes32 public immutable override ledgerId;
+
+    /// @notice Optional trusted callback caller in addition to the queue contract.
+    address public trustedCallbackCaller;
 
     /// @notice Local allow-list of applications this middleware can route for.
     mapping(address => bool) public localApplications;
@@ -124,6 +142,12 @@ contract ClprMiddleware is IClprMiddleware {
 
     /// @notice Emitted when a connector registration is deleted.
     event ConnectorDeleted(bytes32 indexed connectorId);
+
+    /// @notice Emitted when a connector's paired remote middleware address is configured.
+    event ConnectorRemoteMiddlewareSet(bytes32 indexed connectorId, address indexed remoteMiddleware);
+
+    /// @notice Emitted when trusted callback caller configuration changes.
+    event TrustedCallbackCallerSet(address indexed caller);
 
     /// @notice Emitted when the middleware updates its cached remote connector status from a response.
     event RemoteStatusUpdated(
@@ -171,12 +195,19 @@ contract ClprMiddleware is IClprMiddleware {
     constructor(address queueAddress, bytes32 ledgerId_) {
         if (queueAddress == address(0)) revert InvalidQueue();
         queue = queueAddress;
+        owner = msg.sender;
         ledgerId = ledgerId_;
     }
 
     /// @dev Restricts messaging-layer entrypoints to the configured queue contract.
     modifier onlyQueue() {
         if (msg.sender != queue) revert QueueOnly();
+        _;
+    }
+
+    /// @dev Restricts callback entrypoints to queue or trusted callback caller.
+    modifier onlyQueueOrTrustedCallback() {
+        if (msg.sender != queue && msg.sender != trustedCallbackCaller) revert QueueOnly();
         _;
     }
 
@@ -204,6 +235,7 @@ contract ClprMiddleware is IClprMiddleware {
             connectorAddress: msg.sender,
             remoteLedgerId: remoteLedgerId,
             expectedRemoteConnectorId: expectedRemoteConnectorId,
+            remoteMiddleware: address(0),
             admin: admin,
             enabled: true,
             exists: true
@@ -231,6 +263,23 @@ contract ClprMiddleware is IClprMiddleware {
     }
 
     /// @inheritdoc IClprMiddleware
+    function setConnectorRemoteMiddleware(bytes32 connectorId, address remoteMiddleware) external {
+        ConnectorRegistration storage reg = connectors[connectorId];
+        if (!reg.exists) revert InvalidConnectorId();
+        if (msg.sender != reg.admin) revert AdminOnly();
+        if (remoteMiddleware == address(0)) revert InvalidRemoteMiddleware();
+        reg.remoteMiddleware = remoteMiddleware;
+        emit ConnectorRemoteMiddlewareSet(connectorId, remoteMiddleware);
+    }
+
+    /// @inheritdoc IClprMiddleware
+    function setTrustedCallbackCaller(address caller) external {
+        if (msg.sender != owner) revert OwnerOnly();
+        trustedCallbackCaller = caller;
+        emit TrustedCallbackCallerSet(caller);
+    }
+
+    /// @inheritdoc IClprMiddleware
     function send(
         ClprTypes.ClprApplicationMessage calldata applicationMessage
     ) external returns (ClprTypes.ClprSendMessageStatus memory status) {
@@ -252,6 +301,11 @@ contract ClprMiddleware is IClprMiddleware {
 
         ConnectorRegistration memory sourceReg = connectors[applicationMessage.connectorId];
         if (!sourceReg.exists || sourceReg.connectorAddress == address(0) || !sourceReg.enabled) {
+            status.failureReason = ClprTypes.ClprSendFailureReason.ConnectorAbsent;
+            status.failureSide = ClprTypes.ClprSendFailureSide.Source;
+            return status;
+        }
+        if (sourceReg.remoteMiddleware == address(0)) {
             status.failureReason = ClprTypes.ClprSendFailureReason.ConnectorAbsent;
             status.failureSide = ClprTypes.ClprSendFailureSide.Source;
             return status;
@@ -312,7 +366,7 @@ contract ClprMiddleware is IClprMiddleware {
             applicationMessage: applicationMessage,
             destinationConnectorId: destinationConnectorId,
             connectorMessage: connectorMessage,
-            middlewareMessage: _buildSourceMiddlewareMessage(applicationMessage.connectorId)
+            middlewareMessage: _buildSourceMiddlewareMessage(applicationMessage.connectorId, sourceReg.remoteMiddleware)
         });
 
         uint64 messageId;
@@ -350,7 +404,9 @@ contract ClprMiddleware is IClprMiddleware {
     function handleMessage(
         ClprTypes.ClprMessage calldata message,
         uint64 messageId
-    ) external onlyQueue returns (ClprTypes.ClprMessageResponse memory response) {
+    ) external onlyQueueOrTrustedCallback returns (ClprTypes.ClprMessageResponse memory response) {
+        bytes memory responseRouteData = _buildResponseRouteHeader(message.middlewareMessage.data);
+
         address destinationApplication = message.applicationMessage.recipientId;
         if (destinationApplication == address(0)) revert InvalidRecipient();
         if (!localApplications[destinationApplication]) revert ApplicationNotRegistered();
@@ -359,20 +415,26 @@ contract ClprMiddleware is IClprMiddleware {
         ConnectorRegistration memory destinationReg = connectors[message.destinationConnectorId];
         if (!destinationReg.exists || destinationReg.connectorAddress == address(0) || !destinationReg.enabled) {
             ClprTypes.ClprMiddlewareStatus failureStatus = ClprTypes.ClprMiddlewareStatus.ConnectorAbsent;
-            response = _buildFailureResponse(messageId, failureStatus, message.destinationConnectorId);
+            response = _buildFailureResponse(messageId, failureStatus, message.destinationConnectorId, responseRouteData);
             emit InboundMessageHandled(messageId, destinationApplication, failureStatus, message.destinationConnectorId);
             return response;
         }
 
         if (destinationReg.expectedRemoteConnectorId != message.applicationMessage.connectorId) {
             ClprTypes.ClprMiddlewareStatus failureStatus = ClprTypes.ClprMiddlewareStatus.ConnectorAbsent;
-            response = _buildFailureResponse(messageId, failureStatus, message.destinationConnectorId);
+            response = _buildFailureResponse(messageId, failureStatus, message.destinationConnectorId, responseRouteData);
             emit InboundMessageHandled(messageId, destinationApplication, failureStatus, message.destinationConnectorId);
             return response;
         }
 
         ClprTypes.ClprMiddlewareStatus status;
-        (response, status) = _handleMessageWithDestinationConnector(message, messageId, destinationApplication, destinationReg);
+        (response, status) = _handleMessageWithDestinationConnector(
+            message,
+            messageId,
+            destinationApplication,
+            destinationReg,
+            responseRouteData
+        );
         emit InboundMessageHandled(messageId, destinationApplication, status, message.destinationConnectorId);
     }
 
@@ -380,7 +442,8 @@ contract ClprMiddleware is IClprMiddleware {
         ClprTypes.ClprMessage calldata message,
         uint64 messageId,
         address destinationApplication,
-        ConnectorRegistration memory destinationReg
+        ConnectorRegistration memory destinationReg,
+        bytes memory responseRouteData
     ) private returns (ClprTypes.ClprMessageResponse memory response, ClprTypes.ClprMiddlewareStatus status) {
         // Destination-side funds check: if the connector cannot reimburse, reject and do not execute the app.
         ClprTypes.ClprAmount memory minCharge = IClprConnector(destinationReg.connectorAddress).minimumCharge();
@@ -389,7 +452,7 @@ contract ClprMiddleware is IClprMiddleware {
 
         if (_isOutOfFunds(preBalanceReport, minCharge.value)) {
             status = ClprTypes.ClprMiddlewareStatus.ConnectorOutOfFunds;
-            response = _buildFailureResponse(messageId, status, message.destinationConnectorId);
+            response = _buildFailureResponse(messageId, status, message.destinationConnectorId, responseRouteData);
 
             // Notify destination connector of the failure outcome without reimbursing.
             ClprTypes.ClprBilling memory zeroBilling = ClprTypes.ClprBilling({
@@ -404,7 +467,7 @@ contract ClprMiddleware is IClprMiddleware {
                 status: status,
                 minimumCharge: minCharge,
                 maximumCharge: maxCharge,
-                middlewareMessage: ClprTypes.ClprMiddlewareMessage({balanceReport: postReport, data: bytes("")})
+                middlewareMessage: ClprTypes.ClprMiddlewareMessage({balanceReport: postReport, data: responseRouteData})
             });
             return (response, status);
         }
@@ -430,7 +493,7 @@ contract ClprMiddleware is IClprMiddleware {
                 status: status,
                 minimumCharge: minCharge,
                 maximumCharge: maxCharge,
-                middlewareMessage: ClprTypes.ClprMiddlewareMessage({balanceReport: preBalanceReport, data: bytes("")})
+                middlewareMessage: ClprTypes.ClprMiddlewareMessage({balanceReport: preBalanceReport, data: responseRouteData})
             })
         });
 
@@ -445,14 +508,14 @@ contract ClprMiddleware is IClprMiddleware {
         ClprTypes.ClprBalanceReport memory postBalanceReport = IClprConnector(destinationReg.connectorAddress).getBalanceReport(0);
         response.middlewareResponse.middlewareMessage = ClprTypes.ClprMiddlewareMessage({
             balanceReport: postBalanceReport,
-            data: bytes("")
+            data: responseRouteData
         });
 
         return (response, status);
     }
 
     /// @inheritdoc IClprMiddleware
-    function handleMessageResponse(ClprTypes.ClprMessageResponse calldata response) external onlyQueue {
+    function handleMessageResponse(ClprTypes.ClprMessageResponse calldata response) external onlyQueueOrTrustedCallback {
         PendingOutboundMessage memory pending = pendingByMessageId[response.originalMessageId];
         if (!pending.exists) revert UnknownMessage();
         if (!localApplications[pending.sourceApplication]) revert ApplicationNotRegistered();
@@ -503,7 +566,8 @@ contract ClprMiddleware is IClprMiddleware {
     }
 
     function _buildSourceMiddlewareMessage(
-        bytes32 sourceConnectorId
+        bytes32 sourceConnectorId,
+        address destinationMiddleware
     ) private view returns (ClprTypes.ClprMiddlewareMessage memory middlewareMessage) {
         ConnectorRegistration memory reg = connectors[sourceConnectorId];
         if (!reg.exists || reg.connectorAddress == address(0)) {
@@ -522,7 +586,10 @@ contract ClprMiddleware is IClprMiddleware {
 
         // For this prototype, source-connector outstanding commitments are not modeled; provide 0.
         ClprTypes.ClprBalanceReport memory report = IClprConnector(reg.connectorAddress).getBalanceReport(0);
-        middlewareMessage = ClprTypes.ClprMiddlewareMessage({balanceReport: report, data: bytes("")});
+        middlewareMessage = ClprTypes.ClprMiddlewareMessage({
+            balanceReport: report,
+            data: abi.encode(ROUTE_VERSION, reg.remoteLedgerId, address(this), destinationMiddleware)
+        });
     }
 
     function _effectiveMaxCharge(uint256 appMax, uint256 connectorMax) private pure returns (uint256) {
@@ -614,7 +681,8 @@ contract ClprMiddleware is IClprMiddleware {
     function _buildFailureResponse(
         uint64 messageId,
         ClprTypes.ClprMiddlewareStatus status,
-        bytes32 destinationConnectorId
+        bytes32 destinationConnectorId,
+        bytes memory responseRouteData
     ) private pure returns (ClprTypes.ClprMessageResponse memory response) {
         response = ClprTypes.ClprMessageResponse({
             originalMessageId: messageId,
@@ -631,10 +699,20 @@ contract ClprMiddleware is IClprMiddleware {
                         safetyThreshold: ClprTypes.ClprAmount({value: 0, unit: ""}),
                         outstandingCommitments: ClprTypes.ClprAmount({value: 0, unit: ""})
                     }),
-                    data: bytes("")
+                    data: responseRouteData
                 })
             })
         });
+    }
+
+    function _buildResponseRouteHeader(bytes memory requestRouteData) private view returns (bytes memory) {
+        (uint8 version, bytes32 remoteLedgerId, address sourceMiddleware, address destinationMiddleware) =
+            abi.decode(requestRouteData, (uint8, bytes32, address, address));
+        if (version != ROUTE_VERSION) revert InvalidRouteHeader();
+        if (remoteLedgerId == bytes32(0)) revert InvalidRouteHeader();
+        if (sourceMiddleware == address(0)) revert InvalidRouteHeader();
+        if (destinationMiddleware != address(this)) revert InvalidRecipient();
+        return abi.encode(version, remoteLedgerId, sourceMiddleware);
     }
 
     function _buildFailureApplicationResponse(

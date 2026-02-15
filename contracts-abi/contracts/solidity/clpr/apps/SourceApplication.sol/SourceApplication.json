@@ -190,6 +190,25 @@
   {
     "inputs": [
       {
+        "internalType": "uint64",
+        "name": "appMsgId",
+        "type": "uint64"
+      }
+    ],
+    "name": "getResponse",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "payload",
+        "type": "bytes"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "components": [
           {
             "internalType": "bytes",
@@ -210,6 +229,19 @@
     "name": "handleResponse",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "lastReceivedAppMsgId",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -275,6 +307,47 @@
       }
     ],
     "name": "sendWithFailover",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint64",
+            "name": "appMsgId",
+            "type": "uint64"
+          },
+          {
+            "internalType": "enum ClprTypes.ClprSendStatus",
+            "name": "status",
+            "type": "uint8"
+          },
+          {
+            "internalType": "enum ClprTypes.ClprSendFailureReason",
+            "name": "failureReason",
+            "type": "uint8"
+          },
+          {
+            "internalType": "enum ClprTypes.ClprSendFailureSide",
+            "name": "failureSide",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct ClprTypes.ClprSendMessageStatus",
+        "name": "status",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "payload",
+        "type": "bytes"
+      }
+    ],
+    "name": "sendWithFailoverFromFirst",
     "outputs": [
       {
         "components": [

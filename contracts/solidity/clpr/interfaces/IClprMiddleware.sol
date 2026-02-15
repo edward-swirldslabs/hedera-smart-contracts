@@ -34,6 +34,17 @@ interface IClprMiddleware {
     /// @notice Deletes a connector registration.
     function deleteConnector(bytes32 connectorId) external;
 
+    /// @notice Sets the remote middleware address for a registered source connector.
+    /// @dev Needed for route-header population in native queue envelopes.
+    /// @param connectorId Local connector id.
+    /// @param remoteMiddleware Address of the destination middleware on the paired remote ledger.
+    function setConnectorRemoteMiddleware(bytes32 connectorId, address remoteMiddleware) external;
+
+    /// @notice Sets an optional trusted callback caller in addition to the queue contract.
+    /// @dev Used to support native callback dispatch paths where msg.sender is not the queue contract.
+    ///      Set to zero address to disable the override.
+    function setTrustedCallbackCaller(address caller) external;
+
     /// @notice Sends an outbound request from a local application.
     /// @param message Application message containing destination app id, connector id, and payload bytes.
     /// @return status Immediate send status (accepted/rejected) plus middleware-assigned per-application msg id.

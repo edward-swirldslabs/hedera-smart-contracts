@@ -48,6 +48,12 @@ contract SourceApplication is IClprSourceApplication {
     /// @notice Index of the currently-preferred connector within `_connectorIds`.
     uint256 public currentConnectorIndex;
 
+    /// @notice Latest application message id for which a response has been delivered.
+    uint64 public lastReceivedAppMsgId;
+
+    /// @notice Stored responses keyed by application message id.
+    mapping(uint64 => bytes) private _responseByAppMsgId;
+
     /// @notice Emitted when a message is sent through middleware.
     event SendAttempted(
         uint64 indexed appMsgId,
@@ -127,9 +133,30 @@ contract SourceApplication is IClprSourceApplication {
         currentConnectorIndex = _connectorIds.length - 1;
     }
 
+    /// @notice Sends a payload through middleware, always trying connectors from index 0 on each call.
+    /// @dev This matches the "always prefer connector 1, then 2, then 3" behavior used in SOLO scenarios.
+    /// @param payload Opaque application payload.
+    /// @return status The first accepted send status, or the final rejection status if all connectors reject.
+    function sendWithFailoverFromFirst(
+        bytes calldata payload
+    ) external returns (ClprTypes.ClprSendMessageStatus memory status) {
+        for (uint256 idx = 0; idx < _connectorIds.length; idx++) {
+            bytes32 connectorId = _connectorIds[idx];
+            status = _sendOnce(connectorId, payload);
+            if (status.status == ClprTypes.ClprSendStatus.Accepted) {
+                return status;
+            }
+        }
+    }
+
     /// @notice Returns the connector preference list.
     function getConnectorIds() external view returns (bytes32[] memory connectorIds) {
         connectorIds = _connectorIds;
+    }
+
+    /// @notice Returns a previously-delivered response payload for `appMsgId`.
+    function getResponse(uint64 appMsgId) external view returns (bytes memory payload) {
+        payload = _responseByAppMsgId[appMsgId];
     }
 
     /// @inheritdoc IClprSourceApplication
@@ -137,6 +164,8 @@ contract SourceApplication is IClprSourceApplication {
         ClprTypes.ClprApplicationResponse calldata response,
         uint64 appMsgId
     ) external onlyMiddleware {
+        lastReceivedAppMsgId = appMsgId;
+        _responseByAppMsgId[appMsgId] = response.data;
         emit ResponseReceived(appMsgId, response.data);
     }
 

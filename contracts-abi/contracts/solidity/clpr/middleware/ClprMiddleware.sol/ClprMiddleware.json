@@ -47,6 +47,21 @@
   },
   {
     "inputs": [],
+    "name": "InvalidRemoteMiddleware",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRouteHeader",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OwnerOnly",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "QueueOnly",
     "type": "error"
   },
@@ -148,6 +163,25 @@
       }
     ],
     "name": "ConnectorRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "remoteMiddleware",
+        "type": "address"
+      }
+    ],
+    "name": "ConnectorRemoteMiddlewareSet",
     "type": "event"
   },
   {
@@ -311,6 +345,19 @@
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "TrustedCallbackCallerSet",
+    "type": "event"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -334,6 +381,11 @@
         "internalType": "bytes32",
         "name": "expectedRemoteConnectorId",
         "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "remoteMiddleware",
+        "type": "address"
       },
       {
         "internalType": "address",
@@ -952,6 +1004,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -1190,6 +1255,50 @@
       }
     ],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "remoteMiddleware",
+        "type": "address"
+      }
+    ],
+    "name": "setConnectorRemoteMiddleware",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "setTrustedCallbackCaller",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "trustedCallbackCaller",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   }
 ]

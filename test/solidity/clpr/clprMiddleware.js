@@ -177,6 +177,26 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
       await destinationConnector3.registerWithMiddleware(await destinationMiddleware.getAddress())
     ).wait();
 
+    // Source connectors must know the paired remote middleware for native queue route-header encoding.
+    await (
+      await sourceMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId1,
+        await destinationMiddleware.getAddress()
+      )
+    ).wait();
+    await (
+      await sourceMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId2,
+        await destinationMiddleware.getAddress()
+      )
+    ).wait();
+    await (
+      await sourceMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId3,
+        await destinationMiddleware.getAddress()
+      )
+    ).wait();
+
     // Deploy the destination application first so source apps can be constructed with a known destination.
     const echoAppFactory = await ethers.getContractFactory('EchoApplication');
     echoApp = await echoAppFactory.deploy(await destinationMiddleware.getAddress());
@@ -230,6 +250,39 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     );
   });
 
+  it('allows configured trusted callback caller in addition to queue', async function () {
+    const zeroAmount = { value: 0n, unit: '' };
+    const response = {
+      originalMessageId: 999n,
+      applicationResponse: { data: '0x' },
+      connectorResponse: { data: '0x' },
+      middlewareResponse: {
+        status: 0,
+        minimumCharge: zeroAmount,
+        maximumCharge: zeroAmount,
+        middlewareMessage: {
+          balanceReport: {
+            connectorId: ethers.ZeroHash,
+            availableBalance: zeroAmount,
+            safetyThreshold: zeroAmount,
+            outstandingCommitments: zeroAmount,
+          },
+          data: '0x',
+        },
+      },
+    };
+
+    await expect(
+      sourceMiddleware.handleMessageResponse(response)
+    ).to.be.revertedWithCustomError(sourceMiddleware, 'QueueOnly');
+
+    await (await sourceMiddleware.setTrustedCallbackCaller((await ethers.getSigners())[0].address)).wait();
+
+    await expect(
+      sourceMiddleware.handleMessageResponse(response)
+    ).to.be.revertedWithCustomError(sourceMiddleware, 'UnknownMessage');
+  });
+
   it('sends 3 messages with connector preference + failover and enforces destination funds safety threshold', async function () {
     const payload1 = ethers.toUtf8Bytes('mvp-msg-1');
     const payload2 = ethers.toUtf8Bytes('mvp-msg-2');
@@ -239,6 +292,16 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     const tx1 = await sourceApp.sendWithFailover(payload1);
     const r1 = await tx1.wait();
     const b1 = r1.blockNumber;
+
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const expectedRequestRoute = abi.encode(
+      ['uint8', 'bytes32', 'address', 'address'],
+      [1, DEST_LEDGER_ID, await sourceMiddleware.getAddress(), await destinationMiddleware.getAddress()]
+    );
+    const expectedResponseRoute = abi.encode(
+      ['uint8', 'bytes32', 'address'],
+      [1, DEST_LEDGER_ID, await sourceMiddleware.getAddress()]
+    );
 
     const sendEvents1 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b1, b1);
     expect(sendEvents1.length).to.equal(2);
@@ -251,11 +314,14 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     expect(await queue.nextMessageId()).to.equal(1n);
     expect(await sourceConnector1.authorizeCount()).to.equal(1n);
     expect(await sourceConnector2.authorizeCount()).to.equal(1n);
+    expect(await destinationConnector2.lastInboundRequestRouteData()).to.equal(expectedRequestRoute);
+    expect(await queue.pendingResponseRouteData(1n)).to.equal(expectedResponseRoute);
 
     // Message 2: connector 2 accepts.
     await (await sourceApp.sendWithFailover(payload2)).wait();
     expect(await queue.nextMessageId()).to.equal(2n);
     expect(await sourceConnector2.authorizeCount()).to.equal(2n);
+    expect(await queue.pendingResponseRouteData(2n)).to.equal(expectedResponseRoute);
 
     // Deliver both responses so the source middleware learns the remote balance report for connector 2.
     const deliverAllReceipt = await (await queue.deliverAllMessageResponses()).wait();

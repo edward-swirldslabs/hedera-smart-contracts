@@ -687,7 +687,7 @@
           }
         ],
         "internalType": "struct ClprTypes.ClprMessage",
-        "name": "",
+        "name": "message",
         "type": "tuple"
       },
       {
@@ -844,7 +844,7 @@
           }
         ],
         "internalType": "struct ClprTypes.ClprMessageResponse",
-        "name": "",
+        "name": "response",
         "type": "tuple"
       },
       {
@@ -898,6 +898,32 @@
         "internalType": "uint64",
         "name": "",
         "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "lastInboundRequestRouteData",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "lastInboundResponseRouteData",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
       }
     ],
     "stateMutability": "view",

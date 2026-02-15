@@ -100,6 +100,11 @@ Foundry:
 forge test --match-path test/foundry/ClprMiddleware.t.sol
 ```
 
+SOLO (native messaging + native queue, two ledgers):
+
+- Active plan: `docs/clpr/native-messaging-solo-integration-plan/README.md`
+- Quarantined anti-pattern archive (external pump): `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
+
 For SOLO notes and CLI runbooks used during integration debugging, see `AGENTS.md`.
 
 ## Support

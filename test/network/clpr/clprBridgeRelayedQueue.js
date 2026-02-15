@@ -316,6 +316,28 @@ describe('@clprbridge CLPR two-network relayed queue', function () {
       })
     ).wait();
 
+    await (
+      await srcMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId1,
+        await dstMiddleware.getAddress(),
+        { gasLimit: GAS_LIMIT }
+      )
+    ).wait();
+    await (
+      await srcMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId2,
+        await dstMiddleware.getAddress(),
+        { gasLimit: GAS_LIMIT }
+      )
+    ).wait();
+    await (
+      await srcMiddleware.setConnectorRemoteMiddleware(
+        sourceConnectorId3,
+        await dstMiddleware.getAddress(),
+        { gasLimit: GAS_LIMIT }
+      )
+    ).wait();
+
     // Connector 1 "knows" it cannot be used.
     await (await sourceConnector1.setDenyAuthorize(true, { gasLimit: GAS_LIMIT })).wait();
 
@@ -430,4 +452,3 @@ describe('@clprbridge CLPR two-network relayed queue', function () {
     expect(await dstQueue.inboundMessageProcessed(3)).to.equal(true);
   });
 });
-

@@ -68,6 +68,12 @@ contract MockClprConnector is IClprConnector {
     /// @notice Number of times this connector has been notified of an inbound message handling.
     uint64 public handleMessageCount;
 
+    /// @notice Last inbound request route-header bytes observed by this connector on destination-side handling.
+    bytes public lastInboundRequestRouteData;
+
+    /// @notice Last inbound response route-header bytes observed by this connector on destination-side handling.
+    bytes public lastInboundResponseRouteData;
+
     /// @notice Emitted when the connector authorizes a draft.
     event Authorized(
         address indexed middleware,
@@ -249,11 +255,13 @@ contract MockClprConnector is IClprConnector {
 
     /// @inheritdoc IClprConnector
     function handleMessage(
-        ClprTypes.ClprMessage calldata,
-        ClprTypes.ClprMessageResponse calldata,
+        ClprTypes.ClprMessage calldata message,
+        ClprTypes.ClprMessageResponse calldata response,
         ClprTypes.ClprBilling calldata billing
     ) external override returns (ClprTypes.ClprConnectorResponse memory connectorResponse) {
         handleMessageCount++;
+        lastInboundRequestRouteData = message.middlewareMessage.data;
+        lastInboundResponseRouteData = response.middlewareResponse.middlewareMessage.data;
 
         uint256 charge = billing.charge.value;
         if (charge != 0) {

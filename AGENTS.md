@@ -102,6 +102,39 @@ Important planning notes from the spec set:
 - Message/response flow must preserve full context and deterministic handling.
 - Middleware behavior, not implementation language, is the conformance target.
 
+Native messaging + queue system contract integration docs in this repo (SOLO-first):
+
+- `docs/clpr/native-messaging-solo-integration-plan/README.md`
+- `docs/clpr/native-messaging-solo-integration-plan/issues/`
+- `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md` (anti-pattern archive pointer)
+
+Hard guardrails for this phase:
+
+- Do not implement any external pump, relay, or “bundle forwarder”.
+- Cross-ledger message transport must be performed by the in-node `ClprEndpointClient`.
+- Connectors are paymasters only. Do not change connector logic for routing, transport, or delivery.
+- Avoid Solidity API changes (middleware/app/connector). If unavoidable, keep changes minimal and justify in writing.
+
+Diagnostic allowances (temporary; clean up before finalizing):
+
+- Consensus node diagnostics: You may add temporary log lines in `../hiero-consensus-node`, but add an adjacent comment
+  like `// TEMP DIAGNOSTIC: delete after native messaging SOLO integration is stable`.
+- Solidity diagnostics: You may add temporary `emit` events (with an adjacent `// TEMP DIAGNOSTIC:` comment) to improve
+  observability while debugging end-to-end behavior.
+- Tests: You may add/adjust unit tests and HAPI tests in `../hiero-consensus-node` to explore/lock in behavior while
+  debugging. Prefer targeted tests over broad scaffolding.
+- SOLO logging config: You may temporarily patch SOLO-mounted logging config (for example `log4j2.xml`) to make the
+  above diagnostics visible, but revert the logging config to its default once the issue is resolved.
+- Debug tooling: You may add small, single-purpose local debug tools (for example under `tools/clpr/`) to inspect CLPR
+  state/bundles. Keep them minimal and either delete them after stabilization or keep them as explicitly “debug” tools.
+- Consensus node repo hygiene: Keep `../hiero-consensus-node` as close to the committed baseline as possible. Delete
+  untracked/uncommitted files that are not required for the final solution. Experiments should not linger in the
+  consensus-node working tree; quarantine reference material under `docs/quarantine/` in this repo instead.
+- Kubernetes/Docker usage: You have full permission to use `solo` and `kubectl` to manage two SOLO deployments for this
+  work. Prefer safe restarts (service stop/start) over deleting pods, and keep orchestration steps repeatable via scripts.
+
+When working on native messaging + queue integration, read these docs after the CLPR requirements list above.
+
 ## 5) External references to use
 
 - SOLO docs (v0.55.0): `https://solo.hiero.org/v0.55.0/`
@@ -342,3 +375,41 @@ Reliability knobs (adjust as needed in `test/odin/clpr/it1/test-plan.properties`
   - RPC receipts (`checks.rpcReceipt.*`)
   - mirror contract results (`checks.mirrorResult.*`)
   - on-chain source-app state via relay `eth_call` (`checks.sourceState.*`)
+
+## 11) Resume checkpoint (2026-02-14)
+
+Native messaging + queue system contract integration status:
+
+- Transport: `ClprEndpointClient` (no external pump)
+- External “kick”: one-time CLPR config exchange only
+
+Current status:
+
+- Two-ledger SOLO E2E passes via `bash scripts/clpr/native-messaging-solo/run-e2e.sh`.
+- Example evidence bundle: `artifacts/clpr-native-messaging-solo/20260214T005029Z/` (contains `Scenario passed` in `scenario.log`).
+
+Quarantine (anti-pattern archive):
+
+- `docs/quarantine/2026-02-13-native-queue-pump-anti-pattern/`
+
+Active plan and issue set:
+
+- `docs/clpr/native-messaging-solo-integration-plan/README.md`
+- `docs/clpr/native-messaging-solo-integration-plan/issues/`
+
+Current focus:
+
+- `ISSUE-0106` cleanup + regression guards + documentation
+- `ISSUE-0107` pare down `hedera-smart-contracts` diffs to the minimal necessary set
+- `ISSUE-0108` pare down `../hiero-consensus-node` diffs to the minimal necessary set
+
+Recommended resume sequence:
+
+1. Re-read the guardrails in `docs/clpr/native-messaging-solo-integration-plan/README.md`.
+2. Run fast local tests:
+   - `npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat`
+   - `forge test --match-path test/foundry/ClprMiddleware.t.sol`
+3. Run consensus-node unit tests (targeted):
+   - `cd ../hiero-consensus-node && ./gradlew :hiero-clpr-interledger-service-impl:test`
+4. Re-run the SOLO E2E script to catch regressions:
+   - `bash scripts/clpr/native-messaging-solo/run-e2e.sh`

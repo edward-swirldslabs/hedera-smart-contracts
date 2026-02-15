@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: Apache-2.0
+package org.hiero.interledger.clpr.client;
+
+import com.hedera.hapi.block.stream.StateProof;
+import com.hedera.hapi.node.base.AccountID;
+import com.hedera.hapi.node.base.ResponseCodeEnum;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.Nullable;
+import org.hiero.hapi.interledger.state.clpr.ClprLedgerId;
+import org.hiero.hapi.interledger.state.clpr.ClprMessageBundle;
+
+/**
+ * Interface for the CLPR (Cross-Ledger Protocol) client.
+ */
+public interface ClprClient extends AutoCloseable {
+    /**
+     * Result of a CLPR transaction submission attempt.
+     *
+     * @param transactionId the submitted transaction id
+     * @param precheckCode node precheck response returned by gRPC submit
+     */
+    record SubmissionResult(@NonNull com.hedera.hapi.node.base.TransactionID transactionId, @NonNull ResponseCodeEnum precheckCode) {}
+
+    /**
+     * Retrieves the CLPR ledger configuration proof for the remote CLPR Endpoint's local ledger.
+     *
+     * @return state proof containing the remote's local configuration, or {@code null} if unavailable
+     */
+    @Nullable
+    StateProof getConfiguration();
+
+    /**
+     * Retrieves the CLPR ledger configuration proof for the given ledger id, if it exists in the remote ledger's state.
+     *
+     * @param ledgerId target ledger id (blank means remote's local ledger)
+     * @return state proof containing the requested configuration, or {@code null} if unavailable
+     */
+    @Nullable
+    StateProof getConfiguration(@NonNull ClprLedgerId ledgerId);
+
+    /**
+     * Submits a CLPR ledger configuration proof to the remote CLPR endpoint.
+     *
+     * @param ledgerConfigurationProof the state proof wrapping the configuration to set
+     * @return precheck status for the submission
+     */
+    @NonNull
+    ResponseCodeEnum setConfiguration(
+            @NonNull AccountID payerAccountId,
+            @NonNull AccountID nodeAccountId,
+            @NonNull StateProof ledgerConfigurationProof);
+
+    @NonNull
+    ResponseCodeEnum updateMessageQueueMetadata(
+            @NonNull AccountID payerAccountId,
+            @NonNull AccountID nodeAccountId,
+            @NonNull ClprLedgerId ledgerId,
+            @NonNull StateProof messageQueueMetadataProof);
+
+    @Nullable
+    StateProof getMessageQueueMetadata(@NonNull ClprLedgerId ledgerId);
+
+    @NonNull
+    ResponseCodeEnum submitProcessMessageBundleTxn(
+            @NonNull AccountID payerAccountId,
+            @NonNull AccountID nodeAccountId,
+            @NonNull ClprLedgerId ledgerId,
+            @NonNull ClprMessageBundle messageBundle);
+
+    /**
+     * Submits a CLPR process-message-bundle transaction and exposes both precheck and submitted transaction id.
+     *
+     * @param payerAccountId payer account id
+     * @param nodeAccountId target node account id
+     * @param ledgerId local ledger id
+     * @param messageBundle message bundle to process
+     * @return submission result with precheck and transaction id
+     */
+    @NonNull
+    SubmissionResult submitProcessMessageBundleTxnDetailed(
+            @NonNull AccountID payerAccountId,
+            @NonNull AccountID nodeAccountId,
+            @NonNull ClprLedgerId ledgerId,
+            @NonNull ClprMessageBundle messageBundle);
+
+    @Nullable
+    ClprMessageBundle getMessages(@NonNull ClprLedgerId ledgerId, int maxNumMsg, int maxNumBytes);
+
+    /**
+     * Closes the CLPR client connection.
+     */
+    @Override
+    void close();
+}

@@ -151,6 +151,10 @@ contract ClprMiddlewareTest is Test {
         destinationConnector2.registerWithMiddleware(address(destinationMiddleware));
         destinationConnector3.registerWithMiddleware(address(destinationMiddleware));
 
+        sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId1, address(destinationMiddleware));
+        sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId2, address(destinationMiddleware));
+        sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId3, address(destinationMiddleware));
+
         echoApp = new EchoApplication(address(destinationMiddleware));
 
         bytes32[] memory connectorIds = new bytes32[](3);
@@ -183,6 +187,37 @@ contract ClprMiddlewareTest is Test {
         new EchoApplication(address(0));
     }
 
+    function test_TrustedCallbackCallerBypassesQueueOnlyGate() public {
+        ClprTypes.ClprAmount memory zeroAmount = ClprTypes.ClprAmount({value: 0, unit: ""});
+        ClprTypes.ClprMessageResponse memory response = ClprTypes.ClprMessageResponse({
+            originalMessageId: 999,
+            applicationResponse: ClprTypes.ClprApplicationResponse({data: bytes("")}),
+            connectorResponse: ClprTypes.ClprConnectorResponse({data: bytes("")}),
+            middlewareResponse: ClprTypes.ClprMiddlewareResponse({
+                status: ClprTypes.ClprMiddlewareStatus.Success,
+                minimumCharge: zeroAmount,
+                maximumCharge: zeroAmount,
+                middlewareMessage: ClprTypes.ClprMiddlewareMessage({
+                    balanceReport: ClprTypes.ClprBalanceReport({
+                        connectorId: bytes32(0),
+                        availableBalance: zeroAmount,
+                        safetyThreshold: zeroAmount,
+                        outstandingCommitments: zeroAmount
+                    }),
+                    data: bytes("")
+                })
+            })
+        });
+
+        vm.expectRevert(ClprMiddleware.QueueOnly.selector);
+        sourceMiddleware.handleMessageResponse(response);
+
+        sourceMiddleware.setTrustedCallbackCaller(address(this));
+
+        vm.expectRevert(ClprMiddleware.UnknownMessage.selector);
+        sourceMiddleware.handleMessageResponse(response);
+    }
+
     function test_SendsThreeMessagesWithConnectorFailoverAndFundsChecks() public {
         bytes memory payload1 = bytes("mvp-msg-1");
         bytes memory payload2 = bytes("mvp-msg-2");
@@ -194,12 +229,17 @@ contract ClprMiddlewareTest is Test {
         assertEq(queue.nextMessageId(), 1);
         assertEq(sourceConnector1.authorizeCount(), 1);
         assertEq(sourceConnector2.authorizeCount(), 1);
+        bytes memory expectedRequestRoute = abi.encode(uint8(1), DEST_LEDGER_ID, address(sourceMiddleware), address(destinationMiddleware));
+        bytes memory expectedResponseRoute = abi.encode(uint8(1), DEST_LEDGER_ID, address(sourceMiddleware));
+        assertEq(destinationConnector2.lastInboundRequestRouteData(), expectedRequestRoute);
+        assertEq(queue.pendingResponseRouteData(1), expectedResponseRoute);
 
         // Message 2: connector 2 accepts.
         ClprTypes.ClprSendMessageStatus memory s2 = sourceApp.sendWithFailover(payload2);
         assertEq(uint8(s2.status), uint8(ClprTypes.ClprSendStatus.Accepted));
         assertEq(queue.nextMessageId(), 2);
         assertEq(sourceConnector2.authorizeCount(), 2);
+        assertEq(queue.pendingResponseRouteData(2), expectedResponseRoute);
 
         // Deliver responses so the source middleware learns the destination connector's balance report.
         queue.deliverAllMessageResponses();
