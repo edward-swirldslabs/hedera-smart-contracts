@@ -218,6 +218,60 @@ contract ClprMiddlewareTest is Test {
         sourceMiddleware.handleMessageResponse(response);
     }
 
+    function test_RevertWhenNonMiddlewareCallsQueueEnqueueApis() public {
+        address outsider = makeAddr("outsider");
+        ClprTypes.ClprAmount memory zeroAmount = ClprTypes.ClprAmount({value: 0, unit: ""});
+
+        ClprTypes.ClprMessage memory message = ClprTypes.ClprMessage({
+            senderApplicationId: address(sourceApp),
+            applicationMessage: ClprTypes.ClprApplicationMessage({
+                recipientId: address(echoApp),
+                connectorId: sourceConnectorId1,
+                maxCharge: zeroAmount,
+                data: bytes("")
+            }),
+            destinationConnectorId: destinationConnectorId1,
+            connectorMessage: ClprTypes.ClprConnectorMessage({approve: true, maxCharge: zeroAmount, data: bytes("")}),
+            middlewareMessage: ClprTypes.ClprMiddlewareMessage({
+                balanceReport: ClprTypes.ClprBalanceReport({
+                    connectorId: bytes32(0),
+                    availableBalance: zeroAmount,
+                    safetyThreshold: zeroAmount,
+                    outstandingCommitments: zeroAmount
+                }),
+                data: bytes("")
+            })
+        });
+
+        ClprTypes.ClprMessageResponse memory response = ClprTypes.ClprMessageResponse({
+            originalMessageId: 1,
+            applicationResponse: ClprTypes.ClprApplicationResponse({data: bytes("")}),
+            connectorResponse: ClprTypes.ClprConnectorResponse({data: bytes("")}),
+            middlewareResponse: ClprTypes.ClprMiddlewareResponse({
+                status: ClprTypes.ClprMiddlewareStatus.Success,
+                minimumCharge: zeroAmount,
+                maximumCharge: zeroAmount,
+                middlewareMessage: ClprTypes.ClprMiddlewareMessage({
+                    balanceReport: ClprTypes.ClprBalanceReport({
+                        connectorId: bytes32(0),
+                        availableBalance: zeroAmount,
+                        safetyThreshold: zeroAmount,
+                        outstandingCommitments: zeroAmount
+                    }),
+                    data: bytes("")
+                })
+            })
+        });
+
+        vm.prank(outsider);
+        vm.expectRevert(MockClprQueue.MiddlewareOnly.selector);
+        queue.enqueueMessage(message);
+
+        vm.prank(outsider);
+        vm.expectRevert(MockClprQueue.MiddlewareOnly.selector);
+        queue.enqueueMessageResponse(response);
+    }
+
     function test_SendsThreeMessagesWithConnectorFailoverAndFundsChecks() public {
         bytes memory payload1 = bytes("mvp-msg-1");
         bytes memory payload2 = bytes("mvp-msg-2");

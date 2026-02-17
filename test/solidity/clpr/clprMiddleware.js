@@ -2,6 +2,7 @@
 
 const { expect } = require('chai');
 const { ethers } = require('hardhat');
+const { deriveConnectorIds } = require('../../../scripts/clpr/shared/connector-ids');
 
 describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
   const SOURCE_LEDGER_ID = ethers.keccak256(ethers.toUtf8Bytes('clpr-ledger-source'));
@@ -57,27 +58,10 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     weth = await wethFactory.deploy('Wrapped ETH', 'WETH');
     await weth.waitForDeployment();
 
-    // Helper for deriving connector ids (models "hash over config" semantics from the spec).
-    const deriveId = (prefix, ownerKey, localLedger, remoteLedger) =>
-      ethers.keccak256(
-        ethers.solidityPacked(
-          ['string', 'bytes32', 'bytes32', 'bytes32'],
-          [prefix, ownerKey, localLedger, remoteLedger]
-        )
-      );
-
-    const ownerKey1 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-1'));
-    const ownerKey2 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-2'));
-    const ownerKey3 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-3'));
-
-    sourceConnectorId1 = deriveId('src', ownerKey1, SOURCE_LEDGER_ID, DEST_LEDGER_ID);
-    destinationConnectorId1 = deriveId('dst', ownerKey1, DEST_LEDGER_ID, SOURCE_LEDGER_ID);
-
-    sourceConnectorId2 = deriveId('src', ownerKey2, SOURCE_LEDGER_ID, DEST_LEDGER_ID);
-    destinationConnectorId2 = deriveId('dst', ownerKey2, DEST_LEDGER_ID, SOURCE_LEDGER_ID);
-
-    sourceConnectorId3 = deriveId('src', ownerKey3, SOURCE_LEDGER_ID, DEST_LEDGER_ID);
-    destinationConnectorId3 = deriveId('dst', ownerKey3, DEST_LEDGER_ID, SOURCE_LEDGER_ID);
+    const connectorIds = deriveConnectorIds(ethers, SOURCE_LEDGER_ID, DEST_LEDGER_ID);
+    [sourceConnectorId1, sourceConnectorId2, sourceConnectorId3] = connectorIds.source;
+    [destinationConnectorId1, destinationConnectorId2, destinationConnectorId3] =
+      connectorIds.destination;
 
     // Deploy three connector pairs (source uses ETH, destination uses WETH).
     const connectorFactory = await ethers.getContractFactory('MockClprConnector');
@@ -281,6 +265,64 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     await expect(
       sourceMiddleware.handleMessageResponse(response)
     ).to.be.revertedWithCustomError(sourceMiddleware, 'UnknownMessage');
+  });
+
+  it('rejects direct queue enqueue calls from non-middleware callers', async function () {
+    const [, outsider] = await ethers.getSigners();
+    const zeroAmount = { value: 0n, unit: '' };
+
+    const message = {
+      senderApplicationId: await sourceApp.getAddress(),
+      applicationMessage: {
+        recipientId: await echoApp.getAddress(),
+        connectorId: sourceConnectorId1,
+        maxCharge: zeroAmount,
+        data: '0x',
+      },
+      destinationConnectorId: destinationConnectorId1,
+      connectorMessage: {
+        approve: true,
+        maxCharge: zeroAmount,
+        data: '0x',
+      },
+      middlewareMessage: {
+        balanceReport: {
+          connectorId: ethers.ZeroHash,
+          availableBalance: zeroAmount,
+          safetyThreshold: zeroAmount,
+          outstandingCommitments: zeroAmount,
+        },
+        data: '0x',
+      },
+    };
+
+    const response = {
+      originalMessageId: 1n,
+      applicationResponse: { data: '0x' },
+      connectorResponse: { data: '0x' },
+      middlewareResponse: {
+        status: 0,
+        minimumCharge: zeroAmount,
+        maximumCharge: zeroAmount,
+        middlewareMessage: {
+          balanceReport: {
+            connectorId: ethers.ZeroHash,
+            availableBalance: zeroAmount,
+            safetyThreshold: zeroAmount,
+            outstandingCommitments: zeroAmount,
+          },
+          data: '0x',
+        },
+      },
+    };
+
+    await expect(
+      queue.connect(outsider).enqueueMessage(message)
+    ).to.be.revertedWithCustomError(queue, 'MiddlewareOnly');
+
+    await expect(
+      queue.connect(outsider).enqueueMessageResponse(response)
+    ).to.be.revertedWithCustomError(queue, 'MiddlewareOnly');
   });
 
   it('sends 3 messages with connector preference + failover and enforces destination funds safety threshold', async function () {

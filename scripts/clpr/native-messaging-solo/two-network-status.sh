@@ -127,6 +127,42 @@ check_namespace_health() {
     log "Service present: haproxy-node1-svc"
   fi
 
+  if [[ "$SOLO_ENABLE_BLOCK_NODE" == "true" ]]; then
+    local block_node_svc
+    block_node_svc="$(find_block_node_service "$namespace")"
+    if [[ -z "$block_node_svc" ]]; then
+      warn "Block node service not found in namespace '$namespace'"
+      failures=$((failures + 1))
+    else
+      log "Block node service present: $block_node_svc"
+      if ! kubectl -n "$namespace" get endpoints "$block_node_svc" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -Eq '.'; then
+        warn "Block node service '$block_node_svc' has no ready endpoints in namespace '$namespace'"
+        failures=$((failures + 1))
+      else
+        log "Block node service '$block_node_svc' has ready endpoints"
+      fi
+    fi
+  fi
+
+  if [[ "$SOLO_ENABLE_MIRROR" == "true" ]]; then
+    local importer_pod
+    importer_pod="$(kubectl -n "$namespace" get pods -l app.kubernetes.io/component=importer -o name 2>/dev/null | head -n 1 | sed 's#^pod/##')"
+    if [[ -z "$importer_pod" ]]; then
+      warn "Mirror importer pod not found in namespace '$namespace'"
+      failures=$((failures + 1))
+    else
+      log "Mirror importer pod present: $importer_pod"
+      if [[ "$SOLO_ENABLE_BLOCK_NODE" == "true" ]]; then
+        if ! kubectl -n "$namespace" exec "$importer_pod" -- sh -lc 'printenv | grep -Eq "^SPRING_PROFILES_ACTIVE=blocknode$"'; then
+          warn "Mirror importer in '$namespace' is not running with SPRING_PROFILES_ACTIVE=blocknode"
+          failures=$((failures + 1))
+        else
+          log "Mirror importer in '$namespace' confirmed with blocknode profile"
+        fi
+      fi
+    fi
+  fi
+
   local remote_phase
   remote_phase="$(get_remote_consensus_phase "$namespace" || true)"
   if [[ -z "$remote_phase" ]]; then
@@ -170,4 +206,3 @@ if [[ $errors -ne 0 ]]; then
 fi
 
 log "All status checks passed"
-

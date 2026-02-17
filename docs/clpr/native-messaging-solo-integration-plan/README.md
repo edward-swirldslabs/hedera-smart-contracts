@@ -50,3 +50,20 @@ The prior SOLO integration issue set `ISSUE-0101..0108` is also archived as a su
 ## Issue Track (Active)
 
 See `docs/clpr/native-messaging-solo-integration-plan/issues/README.md`.
+
+Current implementation wave for adversarial-review remediations:
+
+- `ISSUE-0301..ISSUE-0310`
+
+## Operational Baseline
+
+For repeatable agent execution and validation in this repository, use:
+
+- `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
+
+That playbook documents:
+
+- artifact cleanup,
+- deterministic rerun command-line,
+- pass/fail and decode-health checks,
+- common Solo failure signatures and fixes.

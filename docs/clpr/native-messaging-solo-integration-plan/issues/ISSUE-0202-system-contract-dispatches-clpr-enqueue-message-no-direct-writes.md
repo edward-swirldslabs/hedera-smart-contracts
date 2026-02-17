@@ -1,6 +1,6 @@
 # ISSUE-0202: System Contract Enqueue Dispatches `clprEnqueueMessage` (No Direct Writes)
 
-Status: Planned
+Status: Done (2026-02-15)
 
 Primary design reference:
 
@@ -32,11 +32,15 @@ Consensus node (`../hiero-consensus-node`):
 
 - `hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/enqueuemessage/ClprQueueEnqueueMessageCall.java` (modify)
 - `hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/enqueuemessageresponse/ClprQueueEnqueueMessageResponseCall.java` (modify)
-- `hedera-node/hedera-smart-contract-service-impl/src/test/java/` (new or modify tests for dispatch semantics)
+- `hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/scope/HederaNativeOperations.java` (modify, add readable metadata store accessor)
+- `hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/scope/HandleHederaNativeOperations.java` (modify)
+- `hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/scope/QueryHederaNativeOperations.java` (modify)
+- `hedera-node/hedera-smart-contract-service-impl/src/test/java/` (modify tests for dispatch semantics)
+- `hedera-node/hedera-file-service-impl/src/main/resources/genesis/throttles-dev.json` (modify, add missing CLPR ops so dispatch isn't always throttled in dev/SOLO)
 
 This repo (`hedera-smart-contracts`):
 
-- No intended code changes.
+- `scripts/clpr/native-messaging-solo/run-e2e.sh` (modify, port-forward supervisor hardening for repeatable SOLO runs)
 
 ## Implementation Tasks
 
@@ -78,7 +82,23 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+- Refactored the CLPR Queue system contract enqueue calls (`enqueueMessage` + `enqueueMessageResponse`) to dispatch a synthetic `clprEnqueueMessage` transaction instead of directly mutating CLPR queue state.
+- Preserved the existing outbound payload bytes (no canonical envelope changes yet) by reusing the pre-existing encode/decode helpers and only changing the write-path.
+- Kept system contract determinism by pre-reading `nextMessageId` from the readable CLPR queue metadata store and dispatching with `expected_message_id=nextMessageId`. The system contract returns that same value as the assigned `messageId`.
+- Root cause of the initial SOLO failure after the refactor: the synthetic dispatch returned `THROTTLED_AT_CONSENSUS` because `ClprEnqueueMessage` (and related CLPR ops) were missing from the dev throttle definitions; the throttle manager treats missing ops as always throttled.
+- Fixed by adding `ClprUpdateMessageQueueMetadata`, `ClprProcessMessageBundle`, and `ClprEnqueueMessage` to `hedera-node/hedera-file-service-impl/src/main/resources/genesis/throttles-dev.json`.
+- Hardened `scripts/clpr/native-messaging-solo/run-e2e.sh` with a lightweight port-forward supervisor to reduce docker-desktop port-forward disconnect flakes during repeated runs.
 - Commands run:
+- `cd ../hiero-consensus-node && ./gradlew :hedera-smart-contract-service-impl:test --tests '*ClprQueueEnqueue*' --no-daemon`
+- `cd ../hiero-consensus-node && ./gradlew :hiero-clpr-interledger-service-impl:test --no-daemon`
+- `cd ../hiero-consensus-node && ./gradlew :app:assemble --no-daemon`
+- `bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build --keep`
 - Test results:
+- System contract enqueue translator tests: passing.
+- CLPR interledger service tests: passing.
 - E2E evidence directories:
+- Failure evidence (dispatch throttled): `artifacts/clpr-native-messaging-solo/20260215T230443Z`
+- Success evidence (after throttles fix): `artifacts/clpr-native-messaging-solo/20260215T231537Z`
+- Success evidence (no-redeploy repeatability run): `artifacts/clpr-native-messaging-solo/20260215T233820Z`
 - Completion summary:
+- `0x16e` queue enqueue entrypoints no longer write queue state directly; outbound queue appends are now transaction-correlated via synthetic `clprEnqueueMessage` dispatch and `ClprEnqueueMessageHandler`.

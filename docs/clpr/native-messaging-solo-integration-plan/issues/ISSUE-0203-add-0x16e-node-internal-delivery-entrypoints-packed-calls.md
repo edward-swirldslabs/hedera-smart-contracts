@@ -1,6 +1,6 @@
 # ISSUE-0203: Add `0x16e` Node-Internal Delivery Entry Points (Packed Calls)
 
-Status: Planned
+Status: Done
 
 Primary design reference:
 
@@ -93,7 +93,21 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+- Added two new node-internal `0x16e` selectors using packed call-data parsing:
+  - `deliverInboundMessagePacked(bytes)` -> request delivery + reply enqueue via `clprEnqueueMessage`.
+  - `deliverInboundMessageReplyPacked(bytes)` -> response delivery callback to middleware.
+- Added superuser-only gating to prevent arbitrary EVM callers from invoking node-internal delivery methods.
+- Registered translators in the CLPR queue translator module and added routing coverage in `ClprQueueCallAttemptTest`.
+- Added targeted translator tests to validate packed parsing, auth gating, selector routing, and dispatch behavior.
 - Commands run:
+- `cd ../hiero-consensus-node`
+- `./gradlew :app-service-contract-impl:test --tests '*ClprQueueDeliverInboundMessageTranslatorTest' --tests '*ClprQueueDeliverInboundMessageReplyTranslatorTest' --tests '*ClprQueueCallAttemptTest' --no-daemon`
+- `cd /Users/user/IdeaProjects/hedera-smart-contracts`
+- `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true SOLO_CLUSTER_REF=solo-shared bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 - Test results:
+- `:app-service-contract-impl:test` targeted suite passed (12 passing tests for the added delivery entrypoints + call-attempt routing).
+- Two-ledger SOLO e2e passed.
 - E2E evidence directories:
+- `artifacts/clpr-native-messaging-solo/20260216T145203Z`
 - Completion summary:
+- ISSUE-0203 acceptance criteria satisfied. The new `0x16e` node-internal delivery entry points are in place, properly gated, tested, and validated by the existing two-ledger SOLO scenario.

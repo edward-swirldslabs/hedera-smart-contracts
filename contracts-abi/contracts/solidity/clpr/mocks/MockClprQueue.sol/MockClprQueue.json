@@ -16,6 +16,11 @@
   },
   {
     "inputs": [],
+    "name": "MiddlewareOnly",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ResponseAlreadyPending",
     "type": "error"
   },

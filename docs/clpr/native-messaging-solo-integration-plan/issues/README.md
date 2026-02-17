@@ -1,4 +1,4 @@
-# Active Issues (Native Messaging SOLO Integration, Refactor 0201+)
+# Active Issues (Native Messaging SOLO Integration, Refactor 0201+ and 0301+)
 
 This directory is the active issue tracker for converging the current working SOLO demo into the production-intended
 architecture described in:
@@ -34,11 +34,25 @@ Exit criteria per issue:
 
 ## Issue List (Active)
 
-- `ISSUE-0201-introduce-clpr-enqueue-message-transaction-and-handler.md` (Planned)
-- `ISSUE-0202-system-contract-dispatches-clpr-enqueue-message-no-direct-writes.md` (Planned)
-- `ISSUE-0203-add-0x16e-node-internal-delivery-entrypoints-packed-calls.md` (Planned)
-- `ISSUE-0204-refactor-bundle-handler-to-use-0x16e-delivery-remove-abi.md` (Planned)
-- `ISSUE-0205-switch-to-canonical-on-wire-envelope-bytes-remove-wrappers.md` (Planned)
-- `ISSUE-0206-remove-legacy-helpers-and-cross-store-plumbing.md` (Planned)
-- `ISSUE-0207-add-regression-tests-for-the-new-pipeline.md` (Planned)
-- `ISSUE-0208-final-hardening-3-clean-solo-runs-and-evidence.md` (Planned)
+- `ISSUE-0201-introduce-clpr-enqueue-message-transaction-and-handler.md` (Done)
+- `ISSUE-0202-system-contract-dispatches-clpr-enqueue-message-no-direct-writes.md` (Done)
+- `ISSUE-0203-add-0x16e-node-internal-delivery-entrypoints-packed-calls.md` (Done)
+- `ISSUE-0204-refactor-bundle-handler-to-use-0x16e-delivery-remove-abi.md` (Done)
+- `ISSUE-0205-switch-to-canonical-on-wire-envelope-bytes-remove-wrappers.md` (Done)
+- `ISSUE-0206-remove-legacy-helpers-and-cross-store-plumbing.md` (Done)
+- `ISSUE-0207-add-regression-tests-for-the-new-pipeline.md` (Done)
+- `ISSUE-0208-final-hardening-3-clean-solo-runs-and-evidence.md` (Done)
+- `ISSUE-0209-adversarial-code-review-and-final-polish.md` (Done)
+
+## Issue List (Current Implementation Wave)
+
+- `ISSUE-0301-extract-clpr-codecs-and-slim-delivery-calls.md` (Done)
+- `ISSUE-0302-deduplicate-native-messaging-js-and-modularize-e2e-runner.md` (Done)
+- `ISSUE-0303-standardize-clpr-observability-signals.md` (Done)
+- `ISSUE-0304-enforce-mock-queue-middleware-only-boundary.md` (Done)
+- `ISSUE-0305-add-internal-only-transaction-abuse-tests.md` (Done)
+- `ISSUE-0306-add-clpr-system-contract-and-selector-coupling-tests.md` (Done)
+- `ISSUE-0307-overhaul-clprmessagessuite-to-exercise-middleware-system-contract-flow.md` (Done)
+- `ISSUE-0308-normalize-clpr-package-naming-symmetry.md` (Done)
+- `ISSUE-0309-add-todo-for-metadata-cleanup-scaling.md` (Done)
+- `ISSUE-0310-full-regression-and-solo-verification-gate.md` (Done)

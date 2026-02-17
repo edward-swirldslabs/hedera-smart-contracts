@@ -17,6 +17,9 @@ contract MockClprQueue is IClprQueue {
     /// @notice Thrown when a non-admin attempts to configure endpoints.
     error AdminOnly();
 
+    /// @notice Thrown when enqueue APIs are called by an address other than the expected middleware.
+    error MiddlewareOnly();
+
     /// @notice Thrown when attempting to deliver a response that is not pending.
     error ResponseNotFound();
 
@@ -81,6 +84,7 @@ contract MockClprQueue is IClprQueue {
     /// @inheritdoc IClprQueue
     function enqueueMessage(ClprTypes.ClprMessage calldata message) external returns (uint64 messageId) {
         if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
+        if (msg.sender != sourceMiddleware) revert MiddlewareOnly();
 
         messageId = ++nextMessageId;
         emit MessageEnqueued(
@@ -105,6 +109,9 @@ contract MockClprQueue is IClprQueue {
     function enqueueMessageResponse(
         ClprTypes.ClprMessageResponse calldata response
     ) external returns (uint64 responseId) {
+        if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
+        if (msg.sender != destinationMiddleware) revert MiddlewareOnly();
+
         ClprTypes.ClprMessageResponse memory responseCopy = response;
         responseId = _storeMessageResponse(responseCopy);
     }

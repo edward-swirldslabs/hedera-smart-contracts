@@ -22,13 +22,25 @@ This folder contains CLPR middleware design notes, reports, operational troubles
   - Pointer to the quarantined pump-based native-queue plan and associated scripts (anti-pattern archive).
 - `NATIVE_MESSAGING_SOLO_AFTER_ACTION_REPORT.md`
   - After action report explaining what was built, why it differs from the pump-based attempt, and how to run the scenario.
+- `CLPR_DEMO_OBSERVABILITY_PLAN.md`
+  - End-to-end observability map (Solidity, native Java, mirror, and block-stream signals).
+- `CLPR_ADVERSARIAL_REVIEW_FIX_PROPOSALS.md`
+  - File-level remediation proposals derived from adversarial review findings, intended as issue-creation input.
+- `block-node-solo-viability-2026-02-16.md`
+  - Current-state findings for CN->BN->MN in Solo and required wiring caveats.
+- `BLOCK_STREAM_TAILER_RUNBOOK.md`
+  - Operational runbook for live BN subscriber feeds and CLPR relevance metadata artifacts.
+- `../../scripts/clpr/README.md`
+  - Script-level operator guide for all `scripts/clpr/` workflows, options, env vars, and manual phase execution.
+- `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
+  - Deterministic clean-rerun procedure, validation checklist, and common failure fixes for reusable agent workflows.
 
 ## Source Code Map
 
 - Contracts: `contracts/solidity/clpr/`
 - Hardhat tests: `test/solidity/clpr/` and `test/network/clpr/`
 - Foundry tests: `test/foundry/`
-- Helper scripts: `scripts/`
+- Helper scripts: `scripts/` (CLPR-specific guide: `scripts/clpr/README.md`)
 
 ## Regression Commands
 
@@ -48,14 +60,26 @@ forge test --match-path test/foundry/ClprMiddleware.t.sol
 # Full build + deploy + kick + scenario + teardown:
 bash scripts/clpr/native-messaging-solo/run-e2e.sh
 
+# Clean rerun baseline used for deterministic verification:
+# CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_HOME=$HOME/.solo-integration \
+# SOLO_SKIP_CLUSTER_SETUP=true SOLO_ENABLE_BLOCK_NODE=true SOLO_ENABLE_MIRROR=false \
+# bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
+#
 # Useful options:
 # bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
 # bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep
+# Disable block-stream tailer if you only want scenario execution:
+# CLPR_ENABLE_BLOCK_STREAM_TAILER=false bash scripts/clpr/native-messaging-solo/run-e2e.sh
+#
+# Script structure:
+# - scripts/clpr/native-messaging-solo/run-e2e.sh (orchestrator)
+# - scripts/clpr/native-messaging-solo/run-e2e-phases.sh (phase functions)
 #
 # The prior pump-based smoke runner was quarantined as an anti-pattern.
 # See:
 # - docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md
 # - docs/clpr/native-messaging-solo-integration-plan/README.md
+# - docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md
 ```
 
 Consensus node sibling repo (`../hiero-consensus-node`) (examples; quote `--tests` patterns to avoid shell expansion):
@@ -93,3 +117,4 @@ allow an explicit trusted caller for local test harnesses:
 3. `NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
 4. `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
 5. `ODIN_HARP_VS_JSONRPC_RELAY.md`
+6. `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`

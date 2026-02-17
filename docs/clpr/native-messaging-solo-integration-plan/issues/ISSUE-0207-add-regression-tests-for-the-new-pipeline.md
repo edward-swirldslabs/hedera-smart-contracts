@@ -1,6 +1,6 @@
 # ISSUE-0207: Add Regression Tests For The New Pipeline
 
-Status: Planned
+Status: Done
 
 Primary design reference:
 
@@ -81,8 +81,19 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+  - Strengthened `ClprEnqueueMessageHandler` coverage with a sequential request/response enqueue test that validates running-hash chaining and queue-id increments.
+  - Updated `ClprProcessMessageBundleHandler` tests to remove wrapper-envelope assumptions and assert canonical payload forwarding in packed `0x16e` dispatch call data.
+  - Added assertions that packed request/reply dispatch bodies contain exact expected selector+payload layouts.
 - Commands run:
+  - `./gradlew :hiero-clpr-interledger-service-impl:test --tests '*ClprEnqueueMessageHandlerTest' --tests '*ClprProcessMessageBundleHandlerTest' --no-daemon`
+  - `./gradlew :hiero-clpr-interledger-service-impl:test :app-service-contract-impl:test :app:assemble --no-daemon`
+  - `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 - Test results:
+  - Targeted regression tests passed (`33 passing`).
+  - Full CLPR-related module validation passed (`:hiero-clpr-interledger-service-impl:test` and `:app-service-contract-impl:test`).
+  - `:app:assemble` passed.
+  - Two-ledger SOLO e2e passed.
 - E2E evidence directories:
+  - `artifacts/clpr-native-messaging-solo/20260216T154004Z`
 - Completion summary:
-
+  - Regression suite now explicitly locks in handler-only enqueue semantics, ABI-free bundle processing, and canonical packed delivery behavior.

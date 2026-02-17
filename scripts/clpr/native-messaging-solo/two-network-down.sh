@@ -57,6 +57,11 @@ destroy_deployment() {
     solo mirror node destroy -d "$deployment" --force "${DEV_ARGS[@]}" -q || true
   fi
 
+  if [[ "$SOLO_ENABLE_BLOCK_NODE" == "true" ]]; then
+    log "Destroying block node for '$deployment' (if present)"
+    solo block node destroy -d "$deployment" --force "${DEV_ARGS[@]}" -q || true
+  fi
+
   log "Destroying consensus network for '$deployment'"
   solo consensus network destroy -d "$deployment" --delete-pvcs --delete-secrets --force "${DEV_ARGS[@]}" -q || \
     solo consensus network destroy -d "$deployment" --force "${DEV_ARGS[@]}" -q

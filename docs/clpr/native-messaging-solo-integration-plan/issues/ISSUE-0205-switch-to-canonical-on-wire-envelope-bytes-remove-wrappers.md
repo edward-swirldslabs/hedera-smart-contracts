@@ -1,6 +1,6 @@
 # ISSUE-0205: Switch To Canonical On-Wire Envelope Bytes (Remove Wrappers)
 
-Status: Planned
+Status: Done
 
 Primary design reference:
 
@@ -83,7 +83,23 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+  - Switched queue payload persistence to canonical on-wire bytes (`input[4:]`) for both request and response queue APIs.
+  - Updated node-internal packed delivery (`0x16e`) request/reply entrypoints to decode canonical bytes and removed wrapper envelope assumptions.
+  - Confirmed middleware callback dispatch and response enqueue still function with canonical payload bytes.
+  - Initial e2e attempt failed due environment mismatch (`SOLO_HOME` defaulting to `~/.solo` instead of integration home); no code change required.
 - Commands run:
+  - `./gradlew :app-service-contract-impl:test --tests '*ClprQueueEnqueueMessageTranslatorTest' --tests '*ClprQueueEnqueueMessageResponseTranslatorTest' --tests '*ClprQueueDeliverInboundMessageTranslatorTest' --tests '*ClprQueueDeliverInboundMessageReplyTranslatorTest' --tests '*ClprQueueCallAttemptTest'`
+  - `./gradlew :app-service-contract-impl:test`
+  - `./gradlew :hiero-clpr-interledger-service-impl:test`
+  - `./gradlew :app:assemble`
+  - `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 - Test results:
+  - Targeted CLPR translator/call-attempt tests passed.
+  - `:app-service-contract-impl:test` passed.
+  - `:hiero-clpr-interledger-service-impl:test` passed.
+  - `:app:assemble` passed.
+  - Two-ledger SOLO e2e passed with canonical bytes.
 - E2E evidence directories:
+  - `artifacts/clpr-native-messaging-solo/20260216T152036Z`
 - Completion summary:
+  - Canonical on-wire payload behavior is implemented and verified without changing user-facing Solidity APIs.

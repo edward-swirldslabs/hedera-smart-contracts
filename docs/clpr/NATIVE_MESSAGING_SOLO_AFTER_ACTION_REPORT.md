@@ -1,6 +1,6 @@
 # Native Messaging SOLO (ClprEndpointClient) After Action Report
 
-Date: 2026-02-14
+Date: 2026-02-16
 
 Scope:
 
@@ -16,9 +16,48 @@ Definition of done:
 - The only external bootstrap action is a one-time exchange of `ClprLedgerConfiguration` state proofs between ledgers (to seed endpoint configuration).
 - The scripted scenario (connector authorization failover + destination-funds depletion) completes successfully and is evidenced by `Scenario passed` in `scenario.log`.
 
-Evidence (a full passing run in this workspace):
+Evidence (latest consecutive passing runs in this workspace):
 
-- `artifacts/clpr-native-messaging-solo/20260214T005029Z/`
+- `artifacts/clpr-native-messaging-solo/20260216T155251Z/`
+- `artifacts/clpr-native-messaging-solo/20260216T155821Z/`
+- `artifacts/clpr-native-messaging-solo/20260216T160351Z/`
+
+All three contain `scenario.log` with `Scenario passed`.
+
+## 0) 2026-02-16 Refactor Completion Addendum (Issue Set 0201-0209)
+
+This report originally captured the earlier SOLO stabilization set (`0101..0108`). The active refactor issue set
+(`0201..0209`) is now complete and is the authoritative finalization path.
+
+Finalized architecture deltas from the earlier state:
+
+- Outbound queue writes are transaction-correlated via `clprEnqueueMessage` handler transactions.
+- `0x16e` system contract enqueue methods now preserve canonical on-wire payload bytes:
+  - request: canonical `abi.encode(ClprMessage)` (selector stripped before persistence),
+  - response: canonical `abi.encode(ClprMessageResponse)` (selector stripped before persistence).
+- Inbound bundle handling delegates to node-internal `0x16e` delivery entry points (`deliverInboundMessagePacked`,
+  `deliverInboundMessageReplyPacked`) rather than embedding ABI tuple handling in CLPR interledger handlers.
+- Legacy helper direct-write path (`ClprQueueOperations`) and cross-store writable plumbing in contract native ops were
+  removed.
+- Regression coverage was expanded to lock in:
+  - handler-only enqueue semantics,
+  - packed delivery dispatch shape,
+  - running-hash chaining across sequential queue appends.
+- Final hardening completed with 3 consecutive clean SOLO E2E passes and adversarial review sign-off.
+
+Validation snapshot at completion:
+
+- `../hiero-consensus-node`:
+  - `./gradlew :hiero-clpr-interledger-service-impl:test :app-service-contract-impl:test :app:assemble --no-daemon` (pass)
+- `hedera-smart-contracts`:
+  - `npx hardhat compile` (pass)
+- SOLO E2E:
+  - 3 consecutive passes using
+    `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
+
+Active issue tracker reference:
+
+- `docs/clpr/native-messaging-solo-integration-plan/issues/README.md`
 
 ---
 

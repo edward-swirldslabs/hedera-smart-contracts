@@ -1,6 +1,6 @@
 # ISSUE-0204: Refactor Bundle Handler To Use `0x16e` Delivery (Remove ABI From Messaging)
 
-Status: Planned
+Status: Done
 
 Primary design reference:
 
@@ -84,7 +84,26 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+- Refactored `ClprProcessMessageBundleHandler` to remove ABI decode/encode behavior and delegate per-message delivery to `0x16e` node-internal selectors with packed call data.
+- Removed direct reply enqueue and any direct outbound queue append behavior from bundle processing; queue appends now occur only through `clprEnqueueMessage` dispatch in the system-contract layer.
+- Removed `headlong` dependency from module runtime (`module-info.java` no longer requires `com.esaulpaugh.headlong`).
+- Updated handler tests to validate the new semantics:
+  - bundle handling performs synthetic dispatches,
+  - queue metadata (`receivedMessageId`, running hash) still advances correctly,
+  - outbound queue metadata is not mutated directly by bundle handler logic.
 - Commands run:
+- `cd ../hiero-consensus-node`
+- `./gradlew :hiero-clpr-interledger-service-impl:test --tests '*ClprProcessMessageBundleHandlerTest' --no-daemon`
+- `./gradlew :hiero-clpr-interledger-service-impl:test --no-daemon`
+- `./gradlew :app:assemble --no-daemon`
+- `cd /Users/user/IdeaProjects/hedera-smart-contracts`
+- `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true SOLO_CLUSTER_REF=solo-shared bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 - Test results:
+- `ClprProcessMessageBundleHandlerTest` passed (22 passing).
+- Full `:hiero-clpr-interledger-service-impl:test` passed (141 passing).
+- `:app:assemble` passed.
+- Two-ledger SOLO e2e passed with the refactored handler.
 - E2E evidence directories:
+- `artifacts/clpr-native-messaging-solo/20260216T150509Z`
 - Completion summary:
+- ISSUE-0204 acceptance criteria satisfied. Messaging-layer ABI handling was removed from bundle processing, `headlong` was removed from runtime module dependencies, and the end-to-end SOLO scenario still succeeds unchanged.

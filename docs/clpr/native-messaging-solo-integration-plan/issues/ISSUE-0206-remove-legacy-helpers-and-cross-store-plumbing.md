@@ -1,6 +1,6 @@
 # ISSUE-0206: Remove Legacy Helpers And Cross-Store Plumbing
 
-Status: Planned
+Status: Done
 
 Primary design reference:
 
@@ -80,7 +80,18 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+  - Removed legacy `ClprQueueOperations` helper and its standalone tests; runtime queue mutation responsibility remains in `ClprEnqueueMessageHandler`.
+  - Removed contract-service writable CLPR queue/message store accessors from `HederaNativeOperations` and `HandleHederaNativeOperations`.
+  - Updated CLPR system-contract tests to stop asserting calls to removed writable accessor methods.
 - Commands run:
+  - `./gradlew :app-service-contract-impl:test :hiero-clpr-interledger-service-impl:test :app:assemble --no-daemon`
+  - `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 - Test results:
+  - `:app-service-contract-impl:test` passed.
+  - `:hiero-clpr-interledger-service-impl:test` passed.
+  - `:app:assemble` passed.
+  - Two-ledger SOLO e2e passed after cleanup.
 - E2E evidence directories:
+  - `artifacts/clpr-native-messaging-solo/20260216T152952Z`
 - Completion summary:
+  - Legacy helper/plumbing removed; queue appends stay transaction-correlated via `clprEnqueueMessage` and end-to-end behavior is unchanged.

@@ -1,6 +1,6 @@
 # ISSUE-0201: Introduce `clprEnqueueMessage` Transaction And Handler
 
-Status: Planned
+Status: Done (2026-02-15)
 
 Primary design reference:
 
@@ -88,8 +88,16 @@ Behavior:
 ## Implementation Log (Append As You Work)
 
 - Notes:
+- Added `clprEnqueueMessage` as a new internal transaction body so outbound CLPR queue appends can be correlated to a transaction in block stream.
+- Implemented `ClprEnqueueMessageHandler` to append exactly one `ClprMessagePayload` into the outbound queue keyed by `ledger_id`.
+- Updated app wiring to recognize the new transaction kind and map it to `HederaFunctionality.CLPR_ENQUEUE_MESSAGE`.
 - Commands run:
+- `cd ../hiero-consensus-node && ./gradlew :hiero-clpr-interledger-service-impl:test --tests '*ClprEnqueueMessageHandlerTest*' --no-daemon`
+- `bash scripts/clpr/native-messaging-solo/run-e2e.sh`
 - Test results:
+- `ClprEnqueueMessageHandlerTest`: 10 passing (Gradle build succeeded).
+- Two-ledger SOLO E2E: succeeded.
 - E2E evidence directories:
+- `artifacts/clpr-native-messaging-solo/20260215T220428Z`
 - Completion summary:
-
+- New `clprEnqueueMessage` transaction exists end-to-end (protos + functionality + wiring + handler + unit tests) without changing the existing SOLO scenario behavior.

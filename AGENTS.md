@@ -107,6 +107,7 @@ Native messaging + queue system contract integration docs in this repo (SOLO-fir
 - `docs/clpr/native-messaging-solo-integration-plan/README.md`
 - `docs/clpr/native-messaging-solo-integration-plan/issues/`
 - `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md` (anti-pattern archive pointer)
+- `docs/clpr/CLPR_ADVERSARIAL_REVIEW_FIX_PROPOSALS.md` (issue-ready remediation proposals derived from adversarial review)
 
 Hard guardrails for this phase:
 
@@ -138,11 +139,19 @@ When working on native messaging + queue integration, read these docs after the 
 ## 5) External references to use
 
 - SOLO docs (v0.55.0): `https://solo.hiero.org/v0.55.0/`
+- SOLO FAQ (v0.55.0): `https://solo.hiero.org/v0.55.0/docs/faq/`
 - Hedera smart contracts tutorials: `https://docs.hedera.com/hedera/tutorials/smart-contracts`
+- Hedera block node public announcement: `https://hedera.com/blog/hedera-block-nodes-in-private-preview/`
+- SOLO issue for one-shot block-node developer experience: `https://github.com/hiero-ledger/solo/issues/3367`
+- SOLO block-node example: `https://github.com/hiero-ledger/solo/tree/main/examples/network-with-block-node`
 - Repo setup docs:
   - `README.md`
   - `TEST_SETUP.md`
   - `test/README.md`
+  - `docs/clpr/block-node-solo-viability-2026-02-16.md`
+  - `docs/clpr/CLPR_DEMO_OBSERVABILITY_PLAN.md`
+  - `docs/clpr/BLOCK_STREAM_TAILER_RUNBOOK.md`
+  - `scripts/clpr/README.md`
 
 Local implementation reference (important when debugging “EVM behavior” questions):
 
@@ -150,6 +159,12 @@ Local implementation reference (important when debugging “EVM behavior” ques
   - Contains the consensus node codebase and the Besu EVM integration/adaptations used by Hiero.
   - If reasoning about low-level EVM execution, traces, storage-slot effects, or revert behavior on SOLO,
     confirm assumptions against this implementation (do not assume a vanilla geth/anvil environment).
+- Sibling repo: `../solo`
+  - Solo CLI source used to verify command/behavior support and known caveats in deployment wiring.
+- Sibling repo: `../hiero-block-node`
+  - Block node implementation and API/docs reference for block stream ingestion and serving.
+- Sibling repo: `../hiero-mirror-node`
+  - Mirror importer source for block-node profile and block stream consumption settings.
 
 ## 6) Local SOLO runbook (CLI v0.55.0)
 
@@ -187,6 +202,7 @@ Known local endpoints used by this repo config:
 
 - JSON-RPC Relay: `http://127.0.0.1:7546`
 - Consensus node gRPC: `127.0.0.1:50211`
+- Block node gRPC (run-e2e local defaults): `127.0.0.1:54080` (src), `127.0.0.1:54081` (dst)
 - Mirror gRPC: `127.0.0.1:5600` (only if you port-forward it)
 - Mirror REST (ODIN default): `http://127.0.0.1:8080` (port-forward `mirror-ingress-controller` -> `:80`)
 - Explorer UI: varies (SOLO may port-forward it to `:8080`, which conflicts with ODIN’s default mirror port)
@@ -196,6 +212,10 @@ Notes:
 - `utils/constants.js` local network values match these endpoints.
 - Explorer may show periodic background transfers from `mirror-1-monitor`; this is expected in SOLO.
 - If ODIN is in use, prefer dedicating `:8080` to mirror REST and run explorer on a different local port.
+- Native-messaging runner structure:
+  - `scripts/clpr/native-messaging-solo/run-e2e.sh` (top-level orchestration entrypoint)
+  - `scripts/clpr/native-messaging-solo/run-e2e-phases.sh` (shared phase functions used by `run-e2e.sh`)
+  - `scripts/clpr/README.md` (complete script catalog + usage/reference)
 
 SOLO v0.55.0 mirror/relay gotcha (important for JSON-RPC Relay stability):
 
@@ -376,40 +396,59 @@ Reliability knobs (adjust as needed in `test/odin/clpr/it1/test-plan.properties`
   - mirror contract results (`checks.mirrorResult.*`)
   - on-chain source-app state via relay `eth_call` (`checks.sourceState.*`)
 
-## 11) Resume checkpoint (2026-02-14)
+## 11) Resume checkpoint (2026-02-16)
 
 Native messaging + queue system contract integration status:
 
-- Transport: `ClprEndpointClient` (no external pump)
+- Transport: `ClprEndpointClient` (no external pump/forwarder)
 - External “kick”: one-time CLPR config exchange only
+- Active refactor issue set `ISSUE-0201..0209`: complete
 
-Current status:
+Latest clean rerun validation:
 
-- Two-ledger SOLO E2E passes via `bash scripts/clpr/native-messaging-solo/run-e2e.sh`.
-- Example evidence bundle: `artifacts/clpr-native-messaging-solo/20260214T005029Z/` (contains `Scenario passed` in `scenario.log`).
+- Evidence bundle: `artifacts/clpr-native-messaging-solo/20260216T210811Z/`
+- Scenario result: `Scenario passed` in `scenario.log`
+- Block-stream tailer decode health:
+  - `block-stream-src.ndjson`: `decode_error=0`
+  - `block-stream-dst.ndjson`: `decode_error=0`
 
-Quarantine (anti-pattern archive):
+Primary rerun command (deterministic integration lane):
+
+```bash
+CLPR_SOLO_HOME=$HOME/.solo-integration \
+SOLO_HOME=$HOME/.solo-integration \
+SOLO_SKIP_CLUSTER_SETUP=true \
+SOLO_ENABLE_BLOCK_NODE=true \
+SOLO_ENABLE_MIRROR=false \
+bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
+```
+
+Operational runbook for agents:
+
+- `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
+
+Quarantine (historical anti-pattern archive; reference only):
 
 - `docs/quarantine/2026-02-13-native-queue-pump-anti-pattern/`
+- `docs/quarantine/2026-02-15-native-messaging-solo-issues-0101-0108-superseded/`
 
-Active plan and issue set:
+If mirror is explicitly in scope:
 
-- `docs/clpr/native-messaging-solo-integration-plan/README.md`
-- `docs/clpr/native-messaging-solo-integration-plan/issues/`
-
-Current focus:
-
-- `ISSUE-0106` cleanup + regression guards + documentation
-- `ISSUE-0107` pare down `hedera-smart-contracts` diffs to the minimal necessary set
-- `ISSUE-0108` pare down `../hiero-consensus-node` diffs to the minimal necessary set
+- Mirror in Solo can be flaky due ingress/RBAC ownership leftovers.
+- If `mirror-ingress-controller` cluster role ownership conflicts appear, clean stale RBAC and rerun:
+  - `kubectl delete clusterrole mirror-ingress-controller --ignore-not-found`
+  - `kubectl delete clusterrolebinding mirror-ingress-controller --ignore-not-found`
 
 Recommended resume sequence:
 
-1. Re-read the guardrails in `docs/clpr/native-messaging-solo-integration-plan/README.md`.
-2. Run fast local tests:
+1. Re-read guardrails:
+   - `docs/clpr/native-messaging-solo-integration-plan/README.md`
+   - `docs/clpr/native-messaging-solo-integration-plan/issues/README.md`
+2. Re-run local smart-contract tests:
    - `npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat`
    - `forge test --match-path test/foundry/ClprMiddleware.t.sol`
-3. Run consensus-node unit tests (targeted):
-   - `cd ../hiero-consensus-node && ./gradlew :hiero-clpr-interledger-service-impl:test`
-4. Re-run the SOLO E2E script to catch regressions:
-   - `bash scripts/clpr/native-messaging-solo/run-e2e.sh`
+3. Re-run targeted consensus-node tests:
+   - `cd ../hiero-consensus-node && ./gradlew :hiero-clpr-interledger-service-impl:test :app-service-contract-impl:test`
+4. Execute clean SOLO rerun and verify:
+   - `scenario.log` is `Scenario passed`
+   - block-stream decode errors remain zero

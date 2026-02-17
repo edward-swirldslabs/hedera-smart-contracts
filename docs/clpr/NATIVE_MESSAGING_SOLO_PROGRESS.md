@@ -1,106 +1,92 @@
 # Native Messaging SOLO Integration (ClprEndpointClient) - Progress Report
 
-Last updated: 2026-02-14
+Last updated: 2026-02-16
 
 ## TL;DR (Current Status)
 
-- Two SOLO networks (source + destination) can be stood up repeatably with a custom locally-built consensus-node applied to both deployments.
-- The one-time CLPR config exchange kick works (no pump):
-  - fetch each ledger's `ClprLedgerConfiguration` state proof, install it on the other ledger,
-  - wait for queue metadata initialization on both ledgers.
-- End-to-end application flow now works in SOLO:
-  - source app sends requests across ledgers,
-  - destination echo app responds,
-  - responses arrive back at the source app,
-  - connector failover + destination funds depletion behavior matches the intended scenario.
-- Cross-ledger transport is performed by the in-node native messaging layer (`ClprEndpointClient`) exchanging `ClprMessageBundle` over CLPR gRPC.
-  No external bundle pump/relay exists in this integration.
+- Active refactor issue set `ISSUE-0201..0209` is complete.
+- End-to-end two-ledger SOLO scenario is stable and repeatable with the native CLPR messaging path:
+  - outbound enqueue from EVM is transaction-correlated via `clprEnqueueMessage`,
+  - cross-ledger transport is in-node `ClprEndpointClient` over CLPR gRPC,
+  - inbound delivery is delegated through `0x16e` node-internal packed entry points,
+  - on-wire payload bytes are canonical `abi.encode(ClprMessage)` / `abi.encode(ClprMessageResponse)` (no wrapper envelope).
+- No external pump/relay/forwarder is used.
 
-Latest passing evidence bundle:
+Latest 3 consecutive passing evidence runs:
 
-- `artifacts/clpr-native-messaging-solo/20260214T005029Z/`
-  - `config-exchange.log`
-  - `scenario.log` (contains `Scenario passed`)
-  - `deployment.json`
-  - `hgcaa-*.log` / `swirlds-*.log` snapshots
+- `artifacts/clpr-native-messaging-solo/20260216T155251Z/`
+- `artifacts/clpr-native-messaging-solo/20260216T155821Z/`
+- `artifacts/clpr-native-messaging-solo/20260216T160351Z/`
 
-Earlier passing run (example):
+Each contains `scenario.log` with `Scenario passed`.
 
-- `artifacts/clpr-native-messaging-solo/20260214T000828Z/`
+Latest clean-rerun validation (artifacts wiped first):
+
+- `artifacts/clpr-native-messaging-solo/20260216T210811Z/`
+- `scenario.log`: `Scenario passed`
+- Block stream tailer decode checks:
+  - source `block-stream-src.ndjson`: `decode_error=0`
+  - destination `block-stream-dst.ndjson`: `decode_error=0`
+
+## Validation Snapshot
+
+Consensus node validations:
+
+- `./gradlew :hiero-clpr-interledger-service-impl:test :app-service-contract-impl:test :app:assemble --no-daemon`
+  - Result: pass
+  - Notable counts: `138 passing` (`hiero-clpr-interledger-service-impl`), `1757 passing` (`app-service-contract-impl`)
+
+Smart-contracts validation:
+
+- `npx hardhat compile`
+  - Result: pass (`Nothing to compile`)
+
+SOLO stability gate:
+
+- Three consecutive passes of:
+  - `CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep`
 
 ## How To Run
 
-End-to-end runner (build + deploy two networks + kick + scenario + teardown):
+Primary E2E command (recommended for integration lane):
 
 ```bash
-bash scripts/clpr/native-messaging-solo/run-e2e.sh
+CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_SKIP_CLUSTER_SETUP=true \
+  bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep
 ```
+
+Notes:
+
+- Use `CLPR_SOLO_HOME` (or `SOLO_HOME`) isolation to avoid collisions with other SOLO workflows (e.g. GUI lane).
+- `SOLO_SKIP_CLUSTER_SETUP=true` avoids concurrent cluster-scoped mutations when cluster reference is already configured.
 
 Helpful options:
 
-- `bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build` (skip rebuilding consensus-node artifacts)
-- `bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep` (keep the two SOLO deployments running after the run)
+- `--no-build` to skip consensus-node artifact rebuild.
+- Omit `--keep` if you want teardown at the end of each run.
+- For deterministic artifact cleanup + rerun + validation checks, use:
+  - `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
 
-## What Was Fixed (Key SOLO Gotchas)
+## Key Operational Fixes / Requirements
 
-### 1) CLPR Ops Throttled Under SOLO Defaults
-
-SOLO uses `genesis/throttles.json` by default; it does not include the prototype CLPR operations. Result: CLPR queries and
-transactions return `BUSY` indefinitely.
-
-Fix: use dev throttles in both ledgers' application properties:
-
+1. CLPR throttles:
+- Use dev throttles in both ledgers:
 - `bootstrap.throttleDefsJson.resource=genesis/throttles-dev.json`
 
-Files:
-
-- `scripts/clpr/native-messaging-solo/config/application-src.properties`
-- `scripts/clpr/native-messaging-solo/config/application-dst.properties`
-
-### 2) In-Cluster DNS (Gossip FQDN) Restrictions
-
-SOLO advertises in-cluster DNS names for endpoints; to keep advertised CLPR endpoints usable, allow FQDNs for gossip:
-
+2. Endpoint publishing + DNS:
+- Endpoint advertisement enabled and in-cluster FQDNs allowed:
+- `clpr.publicizeNetworkAddresses=true`
 - `nodes.gossipFqdnRestricted=false`
 
-### 3) Native Queue System Contract Enabled
-
-Enable the CLPR queue system contract (`0x16e`) in SOLO deployments:
-
+3. Queue system contract enabled:
 - `contracts.systemContract.clprQueue.enabled=true`
 
-### 4) Callback Authorization For Native Bundle Processing
-
-Inbound CLPR bundle processing dispatches synthetic contract calls to middleware callbacks; the EVM `msg.sender` is the
-CLPR transaction payer, not the queue contract.
-
-Fix: allow an explicit trusted callback caller in middleware (`trustedCallbackCaller`) and configure it in the SOLO runner
-to the operator's EVM address.
-
-### 5) Message Envelope Compatibility
-
-The queue system contract adapts `enqueueMessage(...)` into a native queue write by wrapping:
-
-- route header bytes from `ClprMessage.middlewareMessage.data`
-- the original calldata
-
-into the on-wire request envelope that the native bundle handler expects.
-
-### 6) SOLO gRPC TIMEOUT Flakes During Deploy/Execute
-
-SOLO gRPC port-forwarding can be bursty, which can manifest as `GrpcServiceError: Status: TIMEOUT` during
-`ContractCreateFlow` / receipt queries.
-
-Mitigation: the scenario runner increases Hedera JS SDK retry/timeout defaults:
-
-- `HEDERA_MAX_ATTEMPTS` (default: `30`)
-- `HEDERA_REQUEST_TIMEOUT_MS` (default: `60000`)
+4. One-time config exchange kick:
+- Exchange `ClprLedgerConfiguration` state proofs between ledgers before expecting autonomous message flow.
 
 ## Quarantine Notes
 
-The previous pump-based attempt is quarantined here and should not be revived:
+Pump-based historical attempt is quarantined and should not be revived:
 
 - `docs/quarantine/2026-02-13-native-queue-pump-anti-pattern/README.md`
-
-It still contains useful operational notes (e.g., how to apply a local consensus-node build to SOLO) that informed the
-current scripted workflow.
+- `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`

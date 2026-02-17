@@ -30,6 +30,7 @@ const {
   Hbar,
   PrivateKey,
 } = require('@hashgraph/sdk');
+const { deriveConnectorIds } = require('../shared/connector-ids');
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const CLPR_QUEUE_SYSTEM_CONTRACT = '0x000000000000000000000000000000000000016e';
@@ -192,21 +193,9 @@ async function main() {
   };
 
   // Derive connector ids (models spec intent: ids differ across ledgers but are deterministically paired).
-  const deriveId = (prefix, ownerKey, localLedger, remoteLedger) =>
-    ethers.keccak256(
-      ethers.solidityPacked(['string', 'bytes32', 'bytes32', 'bytes32'], [prefix, ownerKey, localLedger, remoteLedger])
-    );
-
-  const ownerKey1 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-1'));
-  const ownerKey2 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-2'));
-  const ownerKey3 = ethers.keccak256(ethers.toUtf8Bytes('connector-owner-3'));
-
-  const srcConnectorId1 = deriveId('src', ownerKey1, srcLedgerId, dstLedgerId);
-  const dstConnectorId1 = deriveId('dst', ownerKey1, dstLedgerId, srcLedgerId);
-  const srcConnectorId2 = deriveId('src', ownerKey2, srcLedgerId, dstLedgerId);
-  const dstConnectorId2 = deriveId('dst', ownerKey2, dstLedgerId, srcLedgerId);
-  const srcConnectorId3 = deriveId('src', ownerKey3, srcLedgerId, dstLedgerId);
-  const dstConnectorId3 = deriveId('dst', ownerKey3, dstLedgerId, srcLedgerId);
+  const connectorIds = deriveConnectorIds(ethers, srcLedgerId, dstLedgerId);
+  const [srcConnectorId1, srcConnectorId2, srcConnectorId3] = connectorIds.source;
+  const [dstConnectorId1, dstConnectorId2, dstConnectorId3] = connectorIds.destination;
 
   const deployment = {
     src: {},
@@ -450,12 +439,30 @@ async function main() {
 
   async function sendAndWait(label, payloadUtf8) {
     const payloadHex = ethers.hexlify(ethers.toUtf8Bytes(payloadUtf8));
-    await executeContract(
-      clientSrc,
-      srcApp.contractId,
-      ifaceSrcApp.encodeFunctionData('sendWithFailoverFromFirst', [payloadHex]),
-      { gas: 1_800_000 }
-    );
+    // Submit the send transaction and decode the return struct so failures include connector-side details.
+    {
+      const callDataHex = ifaceSrcApp.encodeFunctionData('sendWithFailoverFromFirst', [payloadHex]);
+      const tx = new ContractExecuteTransaction()
+        .setContractId(srcApp.contractId)
+        .setGas(1_800_000)
+        .setFunctionParameters(toUint8Array(callDataHex));
+      const txResp = await tx.execute(clientSrc);
+      await txResp.getReceipt(clientSrc);
+      const record = await txResp.getRecord(clientSrc);
+      const decoded = ifaceSrcApp.decodeFunctionResult('sendWithFailoverFromFirst', record.contractFunctionResult.bytes);
+      const statusStruct = decoded[0];
+      const field = (s, name, idx) => (s && s[name] != null ? s[name] : s[idx]);
+      const appMsgId = BigInt(field(statusStruct, 'appMsgId', 0).toString());
+      const status = BigInt(field(statusStruct, 'status', 1).toString());
+      const failureReason = BigInt(field(statusStruct, 'failureReason', 2).toString());
+      const failureSide = BigInt(field(statusStruct, 'failureSide', 3).toString());
+      // 0 = Accepted, 1 = Rejected (ClprTypes.ClprSendStatus)
+      if (status !== 0n) {
+        throw new Error(
+          `sendWithFailoverFromFirst rejected (label=${label}, appMsgId=${appMsgId}, failureReason=${failureReason}, failureSide=${failureSide})`
+        );
+      }
+    }
     const lastAppMsgId = await getUint64(clientSrc, srcMw.contractId, ifaceSrcMw, 'nextAppMsgId', [srcApp.evmAddress]);
     await waitForResponse(lastAppMsgId, 120_000);
     return { label, lastAppMsgId };
