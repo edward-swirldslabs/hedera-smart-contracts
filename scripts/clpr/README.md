@@ -345,6 +345,7 @@ For block-stream tailing:
 
 ## Related runbooks
 
+- `docs/clpr/CLPR_DEMO_OBSERVABILITY_PLAN.md`
 - `docs/clpr/BLOCK_STREAM_TAILER_RUNBOOK.md`
 - `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
 - `docs/clpr/NATIVE_MESSAGING_SOLO_AFTER_ACTION_REPORT.md`

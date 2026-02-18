@@ -23,7 +23,7 @@ This folder contains CLPR middleware design notes, reports, operational troubles
 - `NATIVE_MESSAGING_SOLO_AFTER_ACTION_REPORT.md`
   - After action report explaining what was built, why it differs from the pump-based attempt, and how to run the scenario.
 - `CLPR_DEMO_OBSERVABILITY_PLAN.md`
-  - End-to-end observability map (Solidity, native Java, mirror, and block-stream signals).
+  - End-to-end observability map with the authoritative trace inventory table (Solidity, native Java, mirror, and block-stream signals).
 - `CLPR_ADVERSARIAL_REVIEW_FIX_PROPOSALS.md`
   - File-level remediation proposals derived from adversarial review findings, intended as issue-creation input.
 - `block-node-solo-viability-2026-02-16.md`

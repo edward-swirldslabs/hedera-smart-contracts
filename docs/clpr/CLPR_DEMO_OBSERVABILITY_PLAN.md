@@ -72,14 +72,14 @@ INFO-level boundary logs are now present across the listed CLPR boundary compone
 
 | Component | File | Required boundary log |
 |---|---|---|
-| Queue system contract (enqueue request) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/enqueuemessage/ClprQueueEnqueueMessageCall.java` | Enter execute + decoded route header + dispatched `clprEnqueueMessage` status + assigned messageId |
-| Queue system contract (enqueue response) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/enqueuemessageresponse/ClprQueueEnqueueMessageResponseCall.java` | Enter execute + originalMessageId + route header + dispatch status + assigned response id |
-| Queue system contract (deliver inbound request) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/deliverinboundmessage/ClprQueueDeliverInboundMessageCall.java` | Enter execute + inboundMessageId + callback target middleware + callback status + response enqueue status |
-| Queue system contract (deliver inbound reply) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/deliverinboundmessagereply/ClprQueueDeliverInboundMessageReplyCall.java` | Enter execute + target middleware + callback status |
+| Queue system contract (enqueue request) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/queue/enqueuemessage/ClprQueueEnqueueMessageCall.java` | Enter execute + decoded route header + dispatched `clprEnqueueMessage` status + assigned messageId |
+| Queue system contract (enqueue response) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/queue/enqueuemessageresponse/ClprQueueEnqueueMessageResponseCall.java` | Enter execute + originalMessageId + route header + dispatch status + assigned response id |
+| Queue system contract (deliver inbound request) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/queue/deliverinboundmessage/ClprQueueDeliverInboundMessageCall.java` | Enter execute + inboundMessageId + callback target middleware + callback status + response enqueue status |
+| Queue system contract (deliver inbound reply) | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/exec/systemcontracts/clpr/queue/deliverinboundmessagereply/ClprQueueDeliverInboundMessageReplyCall.java` | Enter execute + target middleware + callback status |
+| CLPR payload transaction handler | `../hiero-consensus-node/hedera-node/hedera-smart-contract-service-impl/src/main/java/com/hedera/node/app/service/contract/impl/handlers/ClprMessagePayloadHandler.java` | Handle start + payload type + dispatched contract call status |
 | Outbound queue txn handler | `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/handlers/ClprEnqueueMessageHandler.java` | Handle start + ledgerId + messageId assigned + hash update complete |
 | Inbound bundle handler | `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/handlers/ClprProcessMessageBundleHandler.java` | Bundle start + first/last ids + skipCount + per payload dispatch result |
 | Endpoint exchange loop | `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/ClprEndpointClient.java` | Cycle start/end + remote endpoint selected + push config status + pull config status + push bundle status + pull bundle status |
-| CLPR gRPC client calls | `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/client/ClprClientImpl.java` | Outbound query/txn start + returned precheck/result status |
 | Query handlers (visibility that queries are actually received) | `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/handlers/ClprGetMessageQueueMetadataHandler.java` and `../hiero-consensus-node/hedera-node/hiero-clpr-interledger-service-impl/src/main/java/org/hiero/interledger/clpr/impl/handlers/ClprGetMessagesHandler.java` | Query received + ledgerId + response-empty/response-with-proof/bundle range |
 
 Log destination:
@@ -91,28 +91,59 @@ Log destination:
 
 ## 3.3 Scenario driver observability (this repo)
 
-Add stage and timing markers in:
-- `scripts/clpr/native-messaging-solo/run-e2e.sh`
-- `scripts/clpr/native-messaging-solo/run-scenario.js`
-
-Required outputs:
-- Stage begin/end with UTC timestamp.
-- Per-message tx hash and tx receipt timestamp.
-- Per-message elapsed timing checkpoints:
-  - submit -> source receipt
-  - source receipt -> destination inbound observed
-  - destination inbound observed -> source response observed
-  - end-to-end submit -> source response observed
+Current implementation:
+- `scripts/clpr/native-messaging-solo/run-e2e.sh` emits UTC-stamped phase boundaries and writes run artifacts.
+- `scripts/clpr/native-messaging-solo/run-scenario.js` performs all deployment + assertions and writes `deployment.json`;
+  it does not yet emit a full per-message timing JSON report.
 
 Output sink:
 - `artifacts/clpr-native-messaging-solo/<runId>/scenario.log`
-- Optional structured JSON timing file in same run directory.
+- `artifacts/clpr-native-messaging-solo/<runId>/run-manifest.env`
+- `artifacts/clpr-native-messaging-solo/<runId>/deployment.json`
+
+## 3.4 Complete Trace Inventory (Authoritative)
+
+This table is the full operational inventory of currently available traces for the two-ledger native-messaging scenario.
+
+| Trace surface | Signal / pattern | Emitted by | Live retrieval | Post-run artifact / endpoint | Correlation keys |
+|---|---|---|---|---|---|
+| EVM event | `SendAttempted` | `contracts/solidity/clpr/apps/SourceApplication.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `appMsgId`, `connectorId`, `status`, `failureReason`, `failureSide` |
+| EVM event | `ResponseReceived` | `contracts/solidity/clpr/apps/SourceApplication.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `appMsgId`, payload hash/content |
+| EVM event | `MessageHandled` | `contracts/solidity/clpr/apps/EchoApplication.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `connectorId`, payload hash/content |
+| EVM event | `Authorized` | `contracts/solidity/clpr/mocks/MockClprConnector.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `destinationConnectorId`, approval, `maxCharge` |
+| EVM event | `SendRejected` | `contracts/solidity/clpr/mocks/MockClprConnector.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `appMsgId`, failure reason/side |
+| EVM event | `Reimbursed` | `contracts/solidity/clpr/mocks/MockClprConnector.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | reimbursed amount, connector balance hash |
+| EVM event | `OutboundMessageEnqueued` | `contracts/solidity/clpr/middleware/ClprMiddleware.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `appMsgId`, `messageId`, source/destination connector ids |
+| EVM event | `InboundMessageHandled` | `contracts/solidity/clpr/middleware/ClprMiddleware.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `messageId`, destination app, middleware status |
+| EVM event | `InboundResponseHandled` | `contracts/solidity/clpr/middleware/ClprMiddleware.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | `messageId`, `appMsgId`, middleware status |
+| EVM event | `RemoteStatusUpdated` | `contracts/solidity/clpr/middleware/ClprMiddleware.sol` | Mirror REST query for tx hash logs | `GET /api/v1/contracts/results/logs?transaction.hash=<txHash>` | destination connector id, available/safety/min/max |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_queue_enqueue_message_call|...` | `.../exec/systemcontracts/clpr/queue/enqueuemessage/ClprQueueEnqueueMessageCall.java` | `kubectl -n <ns> exec <node-pod> -c root-container -- tail -f /opt/hgcapp/services-hedera/HapiApp2.0/output/hgcaa.log` | `artifacts/clpr-native-messaging-solo/<runId>/hgcaa-src.log` / `hgcaa-dst.log` | `remoteLedgerId`, route version, assigned `messageId` |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_queue_enqueue_message_response_call|...` | `.../exec/systemcontracts/clpr/queue/enqueuemessageresponse/ClprQueueEnqueueMessageResponseCall.java` | same as above | same as above | `originalMessageId`, assigned response `messageId` |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_queue_deliver_inbound_message_call|...` | `.../exec/systemcontracts/clpr/queue/deliverinboundmessage/ClprQueueDeliverInboundMessageCall.java` | same as above | same as above | `inboundMessageId`, callback status, response enqueue status |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_queue_deliver_inbound_message_reply_call|...` | `.../exec/systemcontracts/clpr/queue/deliverinboundmessagereply/ClprQueueDeliverInboundMessageReplyCall.java` | same as above | same as above | route decode, callback status |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_message_payload_handler|...` | `.../handlers/ClprMessagePayloadHandler.java` | same as above | same as above | `sourceLedgerId`, `inboundMessageId`, payload type, dispatch status |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_enqueue_message_handler|...` | `.../impl/handlers/ClprEnqueueMessageHandler.java` | same as above | same as above | queue cursor, appended `messageId`, running hash |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_process_message_bundle_handler|...` | `.../impl/handlers/ClprProcessMessageBundleHandler.java` | same as above | same as above | bundle window, skip count, payload dispatch results |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_get_message_queue_metadata_handler|...` | `.../impl/handlers/ClprGetMessageQueueMetadataHandler.java` | same as above | same as above | queue `next/sent/received` ids |
+| Consensus node log (`hgcaa.log`) | `CLPR_OBS|component=clpr_get_messages_handler|...` | `.../impl/handlers/ClprGetMessagesHandler.java` | same as above | same as above | bundle boundaries (`firstMessageInBundle`, `lastMessageInBundle`) |
+| Consensus node log (`hgcaa.log`) | `CLPR Endpoint: ...` | `.../impl/ClprEndpointClient.java` | same as above (use `rg \"CLPR Endpoint:\"`) | `artifacts/clpr-native-messaging-solo/<runId>/hgcaa-*.log` | remote ledger id, selected endpoint, publish/pull status |
+| Consensus platform log (`swirlds.log`) | platform lifecycle / event processing context | consensus platform runtime | `kubectl -n <ns> exec <node-pod> -c root-container -- tail -f /opt/hgcapp/services-hedera/HapiApp2.0/output/swirlds.log` | `artifacts/clpr-native-messaging-solo/<runId>/swirlds-src.log` / `swirlds-dst.log` | node state transitions, platform-level warnings/errors |
+| Test-only consensus log (`test-clients`) | `CLPR_TEST_OBS|component=clpr_messages_suite|...` | `../hiero-consensus-node/hedera-node/test-clients/src/main/java/com/hedera/services/bdd/suites/interledger/ClprMessagesSuite.java` | `./gradlew :test-clients:testSubprocess --tests 'com.hedera.services.bdd.suites.interledger.ClprMessagesSuite'` | subprocess logs in `hedera-node/test-clients/build/*-test/node*/output/` | connector snapshots, send tx records |
+| Block-stream tailer NDJSON | `recordType=frame` | `scripts/clpr/native-messaging-solo/block-stream-tailer.js` | `tail -f artifacts/clpr-native-messaging-solo/<runId>/block-stream-src.ndjson | jq` (or `.../block-stream-dst.ndjson`) | `artifacts/.../block-stream-src.ndjson`, `block-stream-dst.ndjson` | `responseKind`, `blockNumber`, `itemKinds`, CLPR match reasons |
+| Block-stream tailer NDJSON | `recordType=block_item` | `scripts/clpr/native-messaging-solo/block-stream-tailer.js` | same as above | same as above | `itemKind`, `itemHash`, extracted entity IDs/EVM addresses |
+| Block-stream tailer NDJSON | `recordType=decode_error` | `scripts/clpr/native-messaging-solo/block-stream-tailer.js` | same as above | same as above | failing block number, grpcurl exit code/error, skip action |
+| Block-node process log | subscriber/server diagnostics | k8s `block-node-1` pod logs | `kubectl -n <ns> logs statefulset/block-node-1 --tail=400 -f` | `artifacts/clpr-native-messaging-solo/<runId>/block-node-src.log` / `block-node-dst.log` | block availability / ingestion health |
+| Mirror REST | Contract execution metadata | mirror REST API | `curl -sS \"$MIRROR/api/v1/contracts/results/<txHash>\" | jq` | mirror endpoint response | tx hash, consensus timestamp, gas used, status |
+| Mirror REST | EVM event logs | mirror REST API | `curl -sS \"$MIRROR/api/v1/contracts/results/logs?transaction.hash=<txHash>&order=asc&limit=200\" | jq` | mirror endpoint response | tx hash, log index, topic/data payload |
+| Mirror REST | Network readiness | mirror REST API | `curl -sS \"$MIRROR/api/v1/network/nodes?limit=1\" | jq` | mirror endpoint response | node count / liveness |
+| Mirror importer log | Ingest lag and errors | k8s `mirror-1-importer` pod logs | `kubectl -n <ns> logs deploy/mirror-1-importer --tail=400 -f` | `artifacts/clpr-native-messaging-solo/<runId>/mirror-importer-src.log` / `mirror-importer-dst.log` | ingest progress, parser/import errors |
+| Runner/orchestration log | Phase transitions, env manifest, evidence capture | `scripts/clpr/native-messaging-solo/run-e2e.sh` | run script in terminal | `artifacts/clpr-native-messaging-solo/<runId>/run-manifest.env`, `scenario.log`, `config-exchange.log` | run id, local ports, deployment names, scenario pass/fail |
 
 ## 4. Temporal Sequence of Observable Phenomena
 
 This is the expected order for one **successful** message round trip (connector2 or connector3 path).
 
-1. Source app tx submitted (`run-scenario.js` stage log).
+1. Source app tx submitted (observable via source contract result in mirror and follow-on middleware/queue logs).
 2. Source EVM emits connector-attempt events:
    - `Authorized` (connector invoked)
    - `SendAttempted` (attempt result)
@@ -132,7 +163,7 @@ This is the expected order for one **successful** message round trip (connector2
 16. Source queue system contract logs inbound reply delivery call.
 17. Source middleware emits `InboundResponseHandled` and `RemoteStatusUpdated`.
 18. Source app emits `ResponseReceived`.
-19. Driver logs message complete with end-to-end latency.
+19. Scenario runner reaches completion (`Scenario passed`) after all assertions succeed.
 
 ## 4.1 Failover-specific expected sequence (messages 3 and 4)
 
