@@ -8,6 +8,8 @@ This folder contains CLPR middleware design notes, reports, operational troubles
   - Proposed corrected architecture for CLPR native messaging integration in `../hiero-consensus-node`.
 - `CLPR_MIDDLEWARE_OVERVIEW.md`
   - High-level overview of the current CLPR middleware implementation, contract layout, and test strategy.
+- `NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md`
+  - Canonical two-ledger SOLO scenario, sequence of events, expected counters/balances, and operator commands.
 - `CLPR_DEMO_REPORT_2026-02-11.md`
   - Comprehensive demo report covering middleware behavior, single-ledger and two-ledger test flows, and framework comparison.
 - `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
@@ -113,8 +115,9 @@ allow an explicit trusted caller for local test harnesses:
 ## Recommended Reading Order
 
 1. `CLPR_MIDDLEWARE_OVERVIEW.md`
-2. `native-messaging-solo-integration-plan/README.md`
-3. `NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
-4. `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
-5. `ODIN_HARP_VS_JSONRPC_RELAY.md`
-6. `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
+2. `NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md`
+3. `native-messaging-solo-integration-plan/README.md`
+4. `NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
+5. `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
+6. `ODIN_HARP_VS_JSONRPC_RELAY.md`
+7. `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`

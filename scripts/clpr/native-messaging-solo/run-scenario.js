@@ -11,9 +11,10 @@
   It then:
   - Deploys middleware on both ledgers with queue = 0x16e system contract.
   - Deploys connectors, funds destination connectors, deploys source/echo apps.
-  - Sends 4 messages from source:
+  - Sends 6 messages from source:
     - each send tries connector1 (deny), then connector2 (accept until funds run out), then connector3.
-  - Verifies connector2 becomes out-of-funds and source middleware pre-rejects connector2 thereafter.
+  - Tops up destination connector2 once it is underfunded, verifies source middleware learns this via control messaging,
+    then verifies connector2 is usable for one send and becomes underfunded again.
 */
 
 const fs = require('node:fs');
@@ -40,6 +41,7 @@ const WETH_UNIT = 'WETH';
 
 const DEST_MIN_CHARGE = 50n;
 const DEST_SAFETY_THRESHOLD = 60n;
+const CONNECTOR2_TOPOFF = 50n;
 const UINT256_MAX = (1n << 256n) - 1n;
 
 function env(name, fallback = undefined) {
@@ -55,6 +57,10 @@ function mustEnv(name) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function phase(message) {
+  console.log(`[SCENARIO] ${message}`);
 }
 
 function loadArtifact(relPath) {
@@ -148,6 +154,7 @@ async function callContract(client, contractId, callDataHex, opts = {}) {
 async function main() {
   const runDir = env('RUN_DIR');
   if (runDir) fs.mkdirSync(runDir, { recursive: true });
+  phase('starting deployment and execution');
 
   const srcGrpc = mustEnv('SRC_GRPC_ENDPOINT');
   const dstGrpc = mustEnv('DST_GRPC_ENDPOINT');
@@ -156,6 +163,7 @@ async function main() {
 
   const operatorId = env('OPERATOR_ID', '0.0.2');
   const nodeAccountId = env('NODE_ACCOUNT_ID', '0.0.3');
+  const operatorSolidityAddress = solidityAddrFromAccountId(operatorId);
   // CLPR inbound bundle processing dispatches synthetic ContractCall transactions using the CLPR txn payer.
   // In SOLO we submit CLPR transactions as the operator (default 0.0.2), so middleware callbacks will appear
   // as coming from the operator's EVM address (unless overridden).
@@ -373,6 +381,20 @@ async function main() {
     }
   }
 
+  // Configure destination middleware with remote middleware for each destination connector id.
+  // This enables destination-side funding-state transitions to publish control updates back to source.
+  {
+    const iface = new ethers.Interface(artifacts.ClprMiddleware.abi);
+    for (const connectorId of deployment.connectorIds.dst) {
+      await executeContract(
+        clientDst,
+        dstMw.contractId,
+        iface.encodeFunctionData('setConnectorRemoteMiddleware', [connectorId, srcMw.evmAddress]),
+        { gas: 300_000 }
+      );
+    }
+  }
+
   // Deploy source application referencing the destination echo app's address.
   const srcApp = await deployContract(
     clientSrc,
@@ -425,6 +447,44 @@ async function main() {
     return BigInt(decoded[0].toString());
   }
 
+  async function getRemoteStatus(destinationConnectorId) {
+    const res = await callContract(
+      clientSrc,
+      srcMw.contractId,
+      ifaceSrcMw.encodeFunctionData('remoteStatusByDestinationConnector', [destinationConnectorId])
+    );
+    const decoded = ifaceSrcMw.decodeFunctionResult('remoteStatusByDestinationConnector', res.bytes);
+    return {
+      available: BigInt(decoded[0].toString()),
+      safety: BigInt(decoded[1].toString()),
+      minimumCharge: BigInt(decoded[2].toString()),
+      maximumCharge: BigInt(decoded[3].toString()),
+      unit: decoded[4],
+      known: Boolean(decoded[5]),
+      unavailable: Boolean(decoded[6]),
+    };
+  }
+
+  async function waitForRemoteFundingEpoch(destinationConnectorId, minEpoch, timeoutMs) {
+    const start = Date.now();
+    for (;;) {
+      const epoch = await getUint64(
+        clientSrc,
+        srcMw.contractId,
+        ifaceSrcMw,
+        'remoteFundingEpoch',
+        [destinationConnectorId]
+      );
+      if (epoch >= minEpoch) return epoch;
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(
+          `Timed out waiting for remote funding epoch (connector=${destinationConnectorId}, expected>=${minEpoch}, got=${epoch})`
+        );
+      }
+      await sleep(1000);
+    }
+  }
+
   async function waitForResponse(appMsgId, timeoutMs) {
     const start = Date.now();
     for (;;) {
@@ -468,7 +528,8 @@ async function main() {
     return { label, lastAppMsgId };
   }
 
-  // Phase: send 2 messages until destination connector2 reaches safety threshold.
+  phase('phase1-send-initial-two-messages');
+  // Phase 1: send 2 messages until destination connector2 reaches safety threshold.
   await sendAndWait('msg-1', 'solo-msg-1');
   await sendAndWait('msg-2', 'solo-msg-2');
 
@@ -477,50 +538,114 @@ async function main() {
     const bal = await getUint256(clientDst, weth.contractId, ifaceWeth, 'balanceOf', [dstConnectors[1].evmAddress]);
     assert.equal(bal, DEST_SAFETY_THRESHOLD, 'destination connector2 should be at safety threshold after 2 charges');
 
-    const res = await callContract(
+    const remote = await getRemoteStatus(dstConnectorId2);
+    const remoteEpoch = await getUint64(
       clientSrc,
       srcMw.contractId,
-      ifaceSrcMw.encodeFunctionData('remoteStatusByDestinationConnector', [dstConnectorId2])
+      ifaceSrcMw,
+      'remoteFundingEpoch',
+      [dstConnectorId2]
     );
-    const decoded = ifaceSrcMw.decodeFunctionResult('remoteStatusByDestinationConnector', res.bytes);
-    const available = BigInt(decoded[0].toString());
-    const safety = BigInt(decoded[1].toString());
-    const known = Boolean(decoded[5]);
-    const unavailable = Boolean(decoded[6]);
-    assert.equal(known, true, 'remote status for destination connector2 should be known');
-    assert.equal(unavailable, false, 'remote status for destination connector2 should not be unavailable');
-    assert.equal(available, DEST_SAFETY_THRESHOLD, 'remote available balance should match on-ledger balance');
-    assert.equal(safety, DEST_SAFETY_THRESHOLD, 'remote safety threshold should match on-ledger policy');
+    assert.equal(remote.known, true, 'remote status for destination connector2 should be known');
+    assert.equal(remote.unavailable, false, 'remote status for destination connector2 should not be unavailable');
+    assert.equal(remote.available, DEST_SAFETY_THRESHOLD, 'remote available balance should match on-ledger balance');
+    assert.equal(remote.safety, DEST_SAFETY_THRESHOLD, 'remote safety threshold should match on-ledger policy');
+    assert.equal(remote.minimumCharge, DEST_MIN_CHARGE, 'remote minimum charge should match on-ledger policy');
+    assert.equal(remote.unit, WETH_UNIT, 'remote unit should match destination connector local unit');
+    assert.equal(remoteEpoch, 1n, 'remote funding epoch should advance on initial depletion transition');
   }
 
-  // Phase: send two more messages; connector2 should be pre-rejected and connector3 should succeed.
+  phase('phase2-send-two-more-with-connector2-pre-reject');
+  // Phase 2: send two more messages; connector2 should be pre-rejected and connector3 should succeed.
   await sendAndWait('msg-3', 'solo-msg-3');
   await sendAndWait('msg-4', 'solo-msg-4');
 
+  phase(`phase3-topoff-connector2 amount=${CONNECTOR2_TOPOFF.toString()}`);
+  // Top off destination connector2 by 50 WETH using funding-aware deposit.
+  // This should transition connector2 from Underfunded -> Available and publish a control update.
+  await executeContract(
+    clientDst,
+    weth.contractId,
+    ifaceWeth.encodeFunctionData('mint', [operatorSolidityAddress, CONNECTOR2_TOPOFF]),
+    { gas: 250_000 }
+  );
+  await executeContract(
+    clientDst,
+    weth.contractId,
+    ifaceWeth.encodeFunctionData('approve', [dstConnectors[1].evmAddress, CONNECTOR2_TOPOFF]),
+    { gas: 250_000 }
+  );
+  await executeContract(
+    clientDst,
+    dstConnectors[1].contractId,
+    ifaceConnector.encodeFunctionData('depositToken', [CONNECTOR2_TOPOFF]),
+    { gas: 250_000 }
+  );
+
+  await waitForRemoteFundingEpoch(dstConnectorId2, 2n, 60_000);
+  {
+    const bal2 = await getUint256(clientDst, weth.contractId, ifaceWeth, 'balanceOf', [dstConnectors[1].evmAddress]);
+    assert.equal(
+      bal2,
+      DEST_SAFETY_THRESHOLD + CONNECTOR2_TOPOFF,
+      'destination connector2 balance should increase after topoff'
+    );
+
+    const remote = await getRemoteStatus(dstConnectorId2);
+    assert.equal(remote.known, true, 'remote status should remain known after topoff');
+    assert.equal(remote.unavailable, false, 'remote status should remain available after topoff');
+    assert.equal(
+      remote.available,
+      DEST_SAFETY_THRESHOLD + CONNECTOR2_TOPOFF,
+      'source cache should reflect topped-off destination balance'
+    );
+  }
+
+  phase('phase4-send-post-topoff-two-messages');
+  // Phase 3: send one message that should use connector2 again, then one that falls back to connector3.
+  await sendAndWait('msg-5', 'solo-msg-5');
+  await sendAndWait('msg-6', 'solo-msg-6');
+
   // Validate connector attempt counts:
-  // - connector1 authorize called once per send attempt (4 total)
-  // - connector2 authorize called only for first two sends (2 total)
-  // - connector3 authorize called for msg-3 and msg-4 (2 total)
+  // - connector1 authorize called once per send attempt (6 total)
+  // - connector2 authorize called for msg-1,msg-2,msg-5 only (3 total)
+  // - connector3 authorize called for msg-3,msg-4,msg-6 (3 total)
   {
     const a1 = await getUint64(clientSrc, srcConnectors[0].contractId, ifaceConnector, 'authorizeCount');
     const a2 = await getUint64(clientSrc, srcConnectors[1].contractId, ifaceConnector, 'authorizeCount');
     const a3 = await getUint64(clientSrc, srcConnectors[2].contractId, ifaceConnector, 'authorizeCount');
-    assert.equal(a1, 4n, 'source connector1 authorizeCount');
-    assert.equal(a2, 2n, 'source connector2 authorizeCount');
-    assert.equal(a3, 2n, 'source connector3 authorizeCount');
+    assert.equal(a1, 6n, 'source connector1 authorizeCount');
+    assert.equal(a2, 3n, 'source connector2 authorizeCount');
+    assert.equal(a3, 3n, 'source connector3 authorizeCount');
 
     const rej2 = await getUint64(clientSrc, srcConnectors[1].contractId, ifaceConnector, 'sendRejectedCount');
-    assert.equal(rej2, 2n, 'source connector2 should be notified of 2 pre-enqueue rejections');
+    assert.equal(rej2, 3n, 'source connector2 should be notified of 3 pre-enqueue rejections');
   }
 
-  // Validate destination connector funds after msg-3/msg-4 went via connector3.
+  // Validate destination connector funds after topoff and re-deplete cycle.
   {
     const bal2 = await getUint256(clientDst, weth.contractId, ifaceWeth, 'balanceOf', [dstConnectors[1].evmAddress]);
     const bal3 = await getUint256(clientDst, weth.contractId, ifaceWeth, 'balanceOf', [dstConnectors[2].evmAddress]);
     assert.equal(bal2, DEST_SAFETY_THRESHOLD, 'destination connector2 balance should remain at threshold');
-    assert.equal(bal3, 400n, 'destination connector3 balance should reflect two reimbursements');
+    assert.equal(bal3, 350n, 'destination connector3 balance should reflect three reimbursements');
+
+    const remote = await getRemoteStatus(dstConnectorId2);
+    const remoteEpoch = await getUint64(
+      clientSrc,
+      srcMw.contractId,
+      ifaceSrcMw,
+      'remoteFundingEpoch',
+      [dstConnectorId2]
+    );
+    assert.equal(remote.available, DEST_SAFETY_THRESHOLD, 'remote available balance should return to threshold');
+    assert.equal(remote.safety, DEST_SAFETY_THRESHOLD, 'remote safety threshold should be stable');
+    assert.equal(remote.minimumCharge, DEST_MIN_CHARGE, 'remote minimum charge should be stable');
+    assert.equal(remote.known, true, 'remote status should remain known after re-deplete');
+    assert.equal(remote.unavailable, false, 'remote status should remain available after re-deplete');
+    assert.equal(remoteEpoch, 3n, 'remote funding epoch should include topoff and re-deplete transitions');
   }
 
+  phase('scenario-validations-complete');
   console.log('Scenario passed');
   } finally {
     // Explicitly close gRPC channels so the process exits deterministically.

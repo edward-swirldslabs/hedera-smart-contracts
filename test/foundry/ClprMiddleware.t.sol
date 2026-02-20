@@ -151,6 +151,11 @@ contract ClprMiddlewareTest is Test {
         destinationConnector2.registerWithMiddleware(address(destinationMiddleware));
         destinationConnector3.registerWithMiddleware(address(destinationMiddleware));
 
+        // Destination connectors also need paired source middleware for funding-state control updates.
+        destinationMiddleware.setConnectorRemoteMiddleware(destinationConnectorId1, address(sourceMiddleware));
+        destinationMiddleware.setConnectorRemoteMiddleware(destinationConnectorId2, address(sourceMiddleware));
+        destinationMiddleware.setConnectorRemoteMiddleware(destinationConnectorId3, address(sourceMiddleware));
+
         sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId1, address(destinationMiddleware));
         sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId2, address(destinationMiddleware));
         sourceMiddleware.setConnectorRemoteMiddleware(sourceConnectorId3, address(destinationMiddleware));
@@ -214,7 +219,8 @@ contract ClprMiddlewareTest is Test {
 
         sourceMiddleware.setTrustedCallbackCaller(address(this));
 
-        vm.expectRevert(ClprMiddleware.UnknownMessage.selector);
+        // With the trusted caller set, the QueueOnly gate is bypassed. Unknown originalMessageIds now
+        // return silently (control message replies from the native ClprEndpointClient take this path).
         sourceMiddleware.handleMessageResponse(response);
     }
 
@@ -272,14 +278,9 @@ contract ClprMiddlewareTest is Test {
         queue.enqueueMessageResponse(response);
     }
 
-    function test_SendsThreeMessagesWithConnectorFailoverAndFundsChecks() public {
-        bytes memory payload1 = bytes("mvp-msg-1");
-        bytes memory payload2 = bytes("mvp-msg-2");
-        bytes memory payload3 = bytes("mvp-msg-3");
-
+    function test_SendsSixMessagesWithTopoffRecoveryAndRedeplete() public {
         // Message 1: connector 1 rejects; connector 2 accepts.
-        ClprTypes.ClprSendMessageStatus memory s1 = sourceApp.sendWithFailover(payload1);
-        assertEq(uint8(s1.status), uint8(ClprTypes.ClprSendStatus.Accepted));
+        _sendAccepted(bytes("mvp-msg-1"));
         assertEq(queue.nextMessageId(), 1);
         assertEq(sourceConnector1.authorizeCount(), 1);
         assertEq(sourceConnector2.authorizeCount(), 1);
@@ -289,9 +290,8 @@ contract ClprMiddlewareTest is Test {
         assertEq(queue.pendingResponseRouteData(1), expectedResponseRoute);
 
         // Message 2: connector 2 accepts.
-        ClprTypes.ClprSendMessageStatus memory s2 = sourceApp.sendWithFailover(payload2);
-        assertEq(uint8(s2.status), uint8(ClprTypes.ClprSendStatus.Accepted));
-        assertEq(queue.nextMessageId(), 2);
+        _sendAccepted(bytes("mvp-msg-2"));
+        assertGe(queue.nextMessageId(), 2);
         assertEq(sourceConnector2.authorizeCount(), 2);
         assertEq(queue.pendingResponseRouteData(2), expectedResponseRoute);
 
@@ -300,7 +300,70 @@ contract ClprMiddlewareTest is Test {
 
         // Destination connector 2 should now be at the safety threshold boundary.
         assertEq(weth.balanceOf(address(destinationConnector2)), DEST_SAFETY_THRESHOLD);
+        _assertRemoteStatus(destinationConnectorId2, DEST_SAFETY_THRESHOLD, DEST_SAFETY_THRESHOLD, DEST_MIN_CHARGE, 1);
 
+        // Message 3: connector 2 is rejected pre-enqueue; connector 3 accepts.
+        _sendAccepted(bytes("mvp-msg-3"));
+        assertGe(queue.nextMessageId(), 4);
+        assertEq(sourceConnector2.sendRejectedCount(), 1);
+        assertEq(sourceConnector2.authorizeCount(), 2); // no authorize on pre-enqueue rejection
+        assertEq(sourceConnector3.authorizeCount(), 1);
+
+        // Message 4: connector 2 rejected again; connector 3 accepts.
+        _sendAccepted(bytes("mvp-msg-4"));
+        assertGe(queue.nextMessageId(), 5);
+        assertEq(sourceConnector2.sendRejectedCount(), 2);
+        assertEq(sourceConnector2.authorizeCount(), 2);
+        assertEq(sourceConnector3.authorizeCount(), 2);
+        queue.deliverAllMessageResponses();
+
+        // Topoff connector2 by 50 WETH and deposit via funding-aware connector API.
+        weth.mint(address(this), 50);
+        weth.approve(address(destinationConnector2), 50);
+        destinationConnector2.depositToken(50);
+        _assertRemoteStatus(destinationConnectorId2, 110, DEST_SAFETY_THRESHOLD, DEST_MIN_CHARGE, 2);
+
+        // Message 5: connector2 is usable again.
+        _sendAccepted(bytes("mvp-msg-5"));
+        assertGe(queue.nextMessageId(), 7);
+        assertEq(sourceConnector2.authorizeCount(), 3);
+        queue.deliverAllMessageResponses();
+
+        // Depletion transition should publish epoch 3 update and return connector2 to threshold boundary.
+        assertEq(sourceMiddleware.remoteFundingEpoch(destinationConnectorId2), 3);
+        assertEq(weth.balanceOf(address(destinationConnector2)), DEST_SAFETY_THRESHOLD);
+
+        // Message 6: connector2 rejected again; connector3 accepts.
+        _sendAccepted(bytes("mvp-msg-6"));
+        assertGe(queue.nextMessageId(), 8);
+        assertEq(sourceConnector2.sendRejectedCount(), 3);
+        assertEq(sourceConnector3.authorizeCount(), 3);
+        queue.deliverAllMessageResponses();
+
+        // Final connector counters and destination balances.
+        assertEq(sourceConnector1.authorizeCount(), 6);
+        assertEq(sourceConnector2.authorizeCount(), 3);
+        assertEq(sourceConnector2.sendRejectedCount(), 3);
+        assertEq(sourceConnector3.authorizeCount(), 3);
+        assertEq(weth.balanceOf(address(destinationConnector2)), DEST_SAFETY_THRESHOLD);
+        assertEq(weth.balanceOf(address(destinationConnector3)), 350);
+
+        // Destination app handled all six successful messages.
+        assertEq(echoApp.requestCount(), 6);
+    }
+
+    function _sendAccepted(bytes memory payload) private {
+        ClprTypes.ClprSendMessageStatus memory status = sourceApp.sendWithFailoverFromFirst(payload);
+        assertEq(uint8(status.status), uint8(ClprTypes.ClprSendStatus.Accepted));
+    }
+
+    function _assertRemoteStatus(
+        bytes32 destinationConnectorId,
+        uint256 expectedAvailableBalance,
+        uint256 expectedSafetyThreshold,
+        uint256 expectedMinimumCharge,
+        uint64 expectedEpoch
+    ) private {
         (
             uint256 availableBalance,
             uint256 safetyThreshold,
@@ -309,22 +372,13 @@ contract ClprMiddlewareTest is Test {
             string memory unit,
             bool known,
             bool unavailable
-        ) = sourceMiddleware.remoteStatusByDestinationConnector(destinationConnectorId2);
+        ) = sourceMiddleware.remoteStatusByDestinationConnector(destinationConnectorId);
         assertEq(known, true);
         assertEq(unavailable, false);
-        assertEq(availableBalance, DEST_SAFETY_THRESHOLD);
-        assertEq(safetyThreshold, DEST_SAFETY_THRESHOLD);
-        assertEq(minimumCharge, DEST_MIN_CHARGE);
+        assertEq(availableBalance, expectedAvailableBalance);
+        assertEq(safetyThreshold, expectedSafetyThreshold);
+        assertEq(minimumCharge, expectedMinimumCharge);
         assertEq(keccak256(bytes(unit)), keccak256(bytes(WETH_UNIT)));
-
-        // Message 3: connector 2 is rejected pre-enqueue; connector 3 accepts.
-        ClprTypes.ClprSendMessageStatus memory s3 = sourceApp.sendWithFailover(payload3);
-        assertEq(uint8(s3.status), uint8(ClprTypes.ClprSendStatus.Accepted));
-        assertEq(queue.nextMessageId(), 3);
-        assertEq(sourceConnector2.sendRejectedCount(), 1);
-        assertEq(sourceConnector2.authorizeCount(), 2); // no authorize on pre-enqueue rejection
-
-        // Destination app handled three successful messages.
-        assertEq(echoApp.requestCount(), 3);
+        assertEq(sourceMiddleware.remoteFundingEpoch(destinationConnectorId), expectedEpoch);
     }
 }

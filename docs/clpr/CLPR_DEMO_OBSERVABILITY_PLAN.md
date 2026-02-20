@@ -165,7 +165,7 @@ This is the expected order for one **successful** message round trip (connector2
 18. Source app emits `ResponseReceived`.
 19. Scenario runner reaches completion (`Scenario passed`) after all assertions succeed.
 
-## 4.1 Failover-specific expected sequence (messages 3 and 4)
+## 4.1 Failover-specific expected sequence (messages 3, 4, and 6)
 
 For messages where connector2 is no longer usable due known remote funds threshold:
 
@@ -178,16 +178,18 @@ For messages where connector2 is no longer usable due known remote funds thresho
 7. Source app emits `SendAttempted(... connector3 ... Accepted ...)`.
 8. Remaining successful round-trip sequence follows section 4.
 
-## 4.2 Expected event count profile for 4-message scenario
+## 4.2 Expected event count profile for 6-message top-off/re-deplete scenario
 
 Expected totals (stable target):
-- `SourceApplication.SendAttempted`: 10
-- `SourceApplication.ResponseReceived`: 4
-- `MockClprConnector.Authorized` (source side): 8 total (c1=4, c2=2, c3=2)
-- `MockClprConnector.SendRejected` (source connector2): 2
-- `ClprMiddleware.OutboundMessageEnqueued`: 4
-- `EchoApplication.MessageHandled`: 4
-- `ClprMiddleware.InboundResponseHandled`: 4
+- `SourceApplication.SendAttempted`: 15
+- `SourceApplication.ResponseReceived`: 6
+- `MockClprConnector.Authorized` (source side): 12 total (c1=6, c2=3, c3=3)
+- `MockClprConnector.SendRejected` (source connector2): 3
+- `ClprMiddleware.OutboundMessageEnqueued`: 6
+- `EchoApplication.MessageHandled`: 6
+- `ClprMiddleware.InboundResponseHandled`: 6
+- `ClprMiddleware.FundingControlEnqueued`: 3
+- `ClprMiddleware.RemoteFundingStateApplied`: 3
 
 These counts are a quick integrity check that failover behavior is what we expect.
 

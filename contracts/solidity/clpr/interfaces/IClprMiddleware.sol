@@ -64,4 +64,22 @@ interface IClprMiddleware {
     /// @notice Handles an inbound response delivered by the messaging layer.
     /// @param response Verified inbound CLPR response envelope.
     function handleMessageResponse(ClprTypes.ClprMessageResponse calldata response) external;
+
+    /// @notice Called by a registered connector when its funding state transitions.
+    /// @param connectorId Local connector id.
+    /// @param fundingEpoch Monotonic transition epoch from the connector.
+    /// @param state New funding state.
+    /// @param report Current connector balance report.
+    function onConnectorFundingStateTransition(
+        bytes32 connectorId,
+        uint64 fundingEpoch,
+        ClprTypes.ClprFundingState state,
+        ClprTypes.ClprBalanceReport calldata report
+    ) external;
+
+    /// @notice Best-effort admin/manual publication of current connector funding state to remote middleware.
+    function publishConnectorFundingState(bytes32 connectorId) external;
+
+    /// @notice Returns the latest remote funding epoch applied for a destination connector.
+    function remoteFundingEpoch(bytes32 destinationConnectorId) external view returns (uint64 epoch);
 }

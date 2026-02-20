@@ -161,6 +161,26 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
       await destinationConnector3.registerWithMiddleware(await destinationMiddleware.getAddress())
     ).wait();
 
+    // Destination connectors also need paired source middleware for funding-state control updates.
+    await (
+      await destinationMiddleware.setConnectorRemoteMiddleware(
+        destinationConnectorId1,
+        await sourceMiddleware.getAddress()
+      )
+    ).wait();
+    await (
+      await destinationMiddleware.setConnectorRemoteMiddleware(
+        destinationConnectorId2,
+        await sourceMiddleware.getAddress()
+      )
+    ).wait();
+    await (
+      await destinationMiddleware.setConnectorRemoteMiddleware(
+        destinationConnectorId3,
+        await sourceMiddleware.getAddress()
+      )
+    ).wait();
+
     // Source connectors must know the paired remote middleware for native queue route-header encoding.
     await (
       await sourceMiddleware.setConnectorRemoteMiddleware(
@@ -262,9 +282,9 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
 
     await (await sourceMiddleware.setTrustedCallbackCaller((await ethers.getSigners())[0].address)).wait();
 
-    await expect(
-      sourceMiddleware.handleMessageResponse(response)
-    ).to.be.revertedWithCustomError(sourceMiddleware, 'UnknownMessage');
+    // With the trusted caller set, the QueueOnly gate is bypassed. Unknown originalMessageIds now
+    // return silently (control message replies from the native ClprEndpointClient take this path).
+    await expect(sourceMiddleware.handleMessageResponse(response)).to.not.be.reverted;
   });
 
   it('rejects direct queue enqueue calls from non-middleware callers', async function () {
@@ -325,13 +345,17 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     ).to.be.revertedWithCustomError(queue, 'MiddlewareOnly');
   });
 
-  it('sends 3 messages with connector preference + failover and enforces destination funds safety threshold', async function () {
+  it('sends 6 messages with topoff recovery and re-deplete behavior on connector2', async function () {
     const payload1 = ethers.toUtf8Bytes('mvp-msg-1');
     const payload2 = ethers.toUtf8Bytes('mvp-msg-2');
     const payload3 = ethers.toUtf8Bytes('mvp-msg-3');
+    const payload4 = ethers.toUtf8Bytes('mvp-msg-4');
+    const payload5 = ethers.toUtf8Bytes('mvp-msg-5');
+    const payload6 = ethers.toUtf8Bytes('mvp-msg-6');
+    const topoffAmount = 50n;
 
     // Message 1: connector 1 rejects; connector 2 accepts.
-    const tx1 = await sourceApp.sendWithFailover(payload1);
+    const tx1 = await sourceApp.sendWithFailoverFromFirst(payload1);
     const r1 = await tx1.wait();
     const b1 = r1.blockNumber;
 
@@ -360,8 +384,17 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     expect(await queue.pendingResponseRouteData(1n)).to.equal(expectedResponseRoute);
 
     // Message 2: connector 2 accepts.
-    await (await sourceApp.sendWithFailover(payload2)).wait();
-    expect(await queue.nextMessageId()).to.equal(2n);
+    const tx2 = await sourceApp.sendWithFailoverFromFirst(payload2);
+    const r2 = await tx2.wait();
+    const b2 = r2.blockNumber;
+    const sendEvents2 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b2, b2);
+    expect(sendEvents2.length).to.equal(2);
+    expect(sendEvents2[0].args.connectorId).to.equal(sourceConnectorId1);
+    expect(sendEvents2[0].args.status).to.equal(1n); // Rejected
+    expect(sendEvents2[1].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents2[1].args.status).to.equal(0n); // Accepted
+
+    expect(await queue.nextMessageId()).to.be.gte(2n);
     expect(await sourceConnector2.authorizeCount()).to.equal(2n);
     expect(await queue.pendingResponseRouteData(2n)).to.equal(expectedResponseRoute);
 
@@ -385,39 +418,120 @@ describe('@solidityequiv1 CLPR Middleware MVP Connectors', function () {
     expect(remote2.known).to.equal(true);
     expect(remote2.availableBalance).to.equal(60n);
     expect(remote2.safetyThreshold).to.equal(60n);
+    expect(await sourceMiddleware.remoteFundingEpoch(destinationConnectorId2)).to.equal(1n);
 
     // Message 3: connector 2 is rejected pre-enqueue due to remote out-of-funds; connector 3 accepts.
-    const tx3 = await sourceApp.sendWithFailover(payload3);
+    const tx3 = await sourceApp.sendWithFailoverFromFirst(payload3);
     const r3 = await tx3.wait();
     const b3 = r3.blockNumber;
 
     const sendEvents3 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b3, b3);
-    expect(sendEvents3.length).to.equal(2);
-    expect(sendEvents3[0].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents3.length).to.equal(3);
+    expect(sendEvents3[0].args.connectorId).to.equal(sourceConnectorId1);
     expect(sendEvents3[0].args.status).to.equal(1n); // Rejected
-    expect(sendEvents3[0].args.failureReason).to.equal(2n); // ConnectorOutOfFunds
-    expect(sendEvents3[0].args.failureSide).to.equal(2n); // Destination
+    expect(sendEvents3[1].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents3[1].args.status).to.equal(1n); // Rejected
+    expect(sendEvents3[1].args.failureReason).to.equal(2n); // ConnectorOutOfFunds
+    expect(sendEvents3[1].args.failureSide).to.equal(2n); // Destination
 
-    expect(sendEvents3[1].args.connectorId).to.equal(sourceConnectorId3);
-    expect(sendEvents3[1].args.status).to.equal(0n); // Accepted
+    expect(sendEvents3[2].args.connectorId).to.equal(sourceConnectorId3);
+    expect(sendEvents3[2].args.status).to.equal(0n); // Accepted
 
     // Pre-enqueue rejection should notify the connector without calling authorize again.
     expect(await sourceConnector2.sendRejectedCount()).to.equal(1n);
     expect(await sourceConnector2.authorizeCount()).to.equal(2n);
 
-    expect(await queue.nextMessageId()).to.equal(3n);
+    expect(await queue.nextMessageId()).to.be.gte(4n);
 
-    const deliver3Receipt = await (await queue.deliverAllMessageResponses()).wait();
-    const deliver3Block = deliver3Receipt.blockNumber;
-    const responseEvents3 = await sourceApp.queryFilter(
+    // Message 4: connector 2 remains rejected pre-enqueue; connector 3 accepts.
+    const tx4 = await sourceApp.sendWithFailoverFromFirst(payload4);
+    const r4 = await tx4.wait();
+    const b4 = r4.blockNumber;
+
+    const sendEvents4 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b4, b4);
+    expect(sendEvents4.length).to.equal(3);
+    expect(sendEvents4[0].args.connectorId).to.equal(sourceConnectorId1);
+    expect(sendEvents4[0].args.status).to.equal(1n); // Rejected
+    expect(sendEvents4[1].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents4[1].args.status).to.equal(1n); // Rejected
+    expect(sendEvents4[1].args.failureReason).to.equal(2n); // ConnectorOutOfFunds
+    expect(sendEvents4[1].args.failureSide).to.equal(2n); // Destination
+    expect(sendEvents4[2].args.connectorId).to.equal(sourceConnectorId3);
+    expect(sendEvents4[2].args.status).to.equal(0n); // Accepted
+
+    expect(await queue.nextMessageId()).to.be.gte(5n);
+    expect(await sourceConnector2.sendRejectedCount()).to.equal(2n);
+
+    const deliver34Receipt = await (await queue.deliverAllMessageResponses()).wait();
+    const deliver34Block = deliver34Receipt.blockNumber;
+    const responseEvents34 = await sourceApp.queryFilter(
       sourceApp.filters.ResponseReceived(),
-      deliver3Block,
-      deliver3Block
+      deliver34Block,
+      deliver34Block
     );
-    expect(responseEvents3.length).to.equal(1);
-    expect(responseEvents3[0].args.payload).to.equal(ethers.hexlify(payload3));
+    expect(responseEvents34.length).to.equal(2);
+    expect(responseEvents34[0].args.payload).to.equal(ethers.hexlify(payload3));
+    expect(responseEvents34[1].args.payload).to.equal(ethers.hexlify(payload4));
 
-    // Destination app handled three successful messages.
-    expect(await echoApp.requestCount()).to.equal(3n);
+    // Topoff connector2 on destination. Funding-aware deposit should publish an update to source middleware.
+    const [owner] = await ethers.getSigners();
+    await (await weth.mint(owner.address, topoffAmount)).wait();
+    await (await weth.approve(await destinationConnector2.getAddress(), topoffAmount)).wait();
+    await (await destinationConnector2.depositToken(topoffAmount)).wait();
+
+    const remoteAfterTopoff = await sourceMiddleware.remoteStatusByDestinationConnector(destinationConnectorId2);
+    expect(remoteAfterTopoff.availableBalance).to.equal(110n);
+    expect(remoteAfterTopoff.safetyThreshold).to.equal(60n);
+    expect(remoteAfterTopoff.minimumCharge).to.equal(50n);
+    expect(remoteAfterTopoff.known).to.equal(true);
+    expect(remoteAfterTopoff.unavailable).to.equal(false);
+    expect(await sourceMiddleware.remoteFundingEpoch(destinationConnectorId2)).to.equal(2n);
+
+    // Message 5: connector2 is usable again after topoff.
+    const tx5 = await sourceApp.sendWithFailoverFromFirst(payload5);
+    const r5 = await tx5.wait();
+    const b5 = r5.blockNumber;
+    const sendEvents5 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b5, b5);
+    expect(sendEvents5.length).to.equal(2);
+    expect(sendEvents5[0].args.connectorId).to.equal(sourceConnectorId1);
+    expect(sendEvents5[0].args.status).to.equal(1n); // Rejected
+    expect(sendEvents5[1].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents5[1].args.status).to.equal(0n); // Accepted
+
+    expect(await queue.nextMessageId()).to.be.gte(7n);
+    await (await queue.deliverAllMessageResponses()).wait();
+    expect(await sourceMiddleware.remoteFundingEpoch(destinationConnectorId2)).to.equal(3n);
+    expect(await weth.balanceOf(await destinationConnector2.getAddress())).to.equal(60n);
+
+    // Message 6: connector2 should now be rejected again and fail over to connector3.
+    const tx6 = await sourceApp.sendWithFailoverFromFirst(payload6);
+    const r6 = await tx6.wait();
+    const b6 = r6.blockNumber;
+    const sendEvents6 = await sourceApp.queryFilter(sourceApp.filters.SendAttempted(), b6, b6);
+    expect(sendEvents6.length).to.equal(3);
+    expect(sendEvents6[0].args.connectorId).to.equal(sourceConnectorId1);
+    expect(sendEvents6[0].args.status).to.equal(1n); // Rejected
+    expect(sendEvents6[1].args.connectorId).to.equal(sourceConnectorId2);
+    expect(sendEvents6[1].args.status).to.equal(1n); // Rejected
+    expect(sendEvents6[1].args.failureReason).to.equal(2n); // ConnectorOutOfFunds
+    expect(sendEvents6[1].args.failureSide).to.equal(2n); // Destination
+    expect(sendEvents6[2].args.connectorId).to.equal(sourceConnectorId3);
+    expect(sendEvents6[2].args.status).to.equal(0n); // Accepted
+
+    expect(await queue.nextMessageId()).to.be.gte(8n);
+    await (await queue.deliverAllMessageResponses()).wait();
+
+    // Final source-side connector attempt counters.
+    expect(await sourceConnector1.authorizeCount()).to.equal(6n);
+    expect(await sourceConnector2.authorizeCount()).to.equal(3n);
+    expect(await sourceConnector3.authorizeCount()).to.equal(3n);
+    expect(await sourceConnector2.sendRejectedCount()).to.equal(3n);
+
+    // Final destination connector balances.
+    expect(await weth.balanceOf(await destinationConnector2.getAddress())).to.equal(60n);
+    expect(await weth.balanceOf(await destinationConnector3.getAddress())).to.equal(350n);
+
+    // Destination app handled all six successful messages.
+    expect(await echoApp.requestCount()).to.equal(6n);
   });
 });

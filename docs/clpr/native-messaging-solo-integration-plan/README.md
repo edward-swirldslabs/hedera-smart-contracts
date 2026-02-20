@@ -7,6 +7,7 @@ Get CLPR message passing working between **two SOLO deployments** using the **ex
 Refactor reference architecture:
 
 - `docs/clpr/CLPR_CONSENSUS_NODE_REFACTOR_PROPOSAL.md`
+- `docs/clpr/NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md`
 
 ## Target Architecture (The Intended End State)
 

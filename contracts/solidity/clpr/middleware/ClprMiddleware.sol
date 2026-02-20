@@ -91,6 +91,9 @@ contract ClprMiddleware is IClprMiddleware {
     /// @notice Thrown when a request route header cannot be decoded or validated.
     error InvalidRouteHeader();
 
+    /// @notice Thrown when a connector-only callback is invoked by a non-connector caller.
+    error ConnectorOnly();
+
     /// @notice Address of the messaging-layer queue mock used for enqueue and callbacks.
     address public immutable queue;
 
@@ -121,6 +124,12 @@ contract ClprMiddleware is IClprMiddleware {
 
     /// @notice Latest known remote connector funding/policy status keyed by destination connector id.
     mapping(bytes32 => RemoteConnectorStatus) public remoteStatusByDestinationConnector;
+
+    /// @notice Latest local funding epoch accepted from a local connector.
+    mapping(bytes32 => uint64) public localFundingEpochByConnector;
+
+    /// @notice Latest remote funding epoch applied for a destination connector.
+    mapping(bytes32 => uint64) public override remoteFundingEpoch;
 
     /// @notice Penalty counter for a source connector id (placeholder for slashing policy).
     mapping(bytes32 => uint64) public penaltyCountBySourceConnector;
@@ -161,6 +170,25 @@ contract ClprMiddleware is IClprMiddleware {
 
     /// @notice Emitted when a source connector is penalized due to an out-of-funds response.
     event ConnectorPenalized(bytes32 indexed sourceConnectorId, uint64 newPenaltyCount);
+
+    /// @notice Emitted when local middleware accepts a connector funding-state transition callback.
+    event LocalFundingTransitionObserved(
+        bytes32 indexed connectorId,
+        uint64 fundingEpoch,
+        ClprTypes.ClprFundingState state
+    );
+
+    /// @notice Emitted when middleware enqueues a funding control update.
+    event FundingControlEnqueued(bytes32 indexed connectorId, uint64 fundingEpoch, bytes32 indexed remoteLedgerId);
+
+    /// @notice Emitted when remote funding state is applied from a control message.
+    event RemoteFundingStateApplied(
+        bytes32 indexed destinationConnectorId,
+        uint64 fundingEpoch,
+        ClprTypes.ClprFundingState state,
+        uint256 availableBalance,
+        uint256 safetyThreshold
+    );
 
     /// @notice Emitted after the middleware successfully enqueues an outbound message.
     event OutboundMessageEnqueued(
@@ -277,6 +305,38 @@ contract ClprMiddleware is IClprMiddleware {
         if (msg.sender != owner) revert OwnerOnly();
         trustedCallbackCaller = caller;
         emit TrustedCallbackCallerSet(caller);
+    }
+
+    /// @inheritdoc IClprMiddleware
+    function onConnectorFundingStateTransition(
+        bytes32 connectorId,
+        uint64 fundingEpoch,
+        ClprTypes.ClprFundingState state,
+        ClprTypes.ClprBalanceReport calldata report
+    ) external {
+        ConnectorRegistration memory reg = connectors[connectorId];
+        if (!reg.exists || reg.connectorAddress == address(0)) revert InvalidConnectorId();
+        if (msg.sender != reg.connectorAddress) revert ConnectorOnly();
+        if (fundingEpoch <= localFundingEpochByConnector[connectorId]) return;
+
+        localFundingEpochByConnector[connectorId] = fundingEpoch;
+        emit LocalFundingTransitionObserved(connectorId, fundingEpoch, state);
+        _publishFundingStateUpdate(connectorId, fundingEpoch, state, report, reg);
+    }
+
+    /// @inheritdoc IClprMiddleware
+    function publishConnectorFundingState(bytes32 connectorId) external {
+        ConnectorRegistration memory reg = connectors[connectorId];
+        if (!reg.exists || reg.connectorAddress == address(0)) revert InvalidConnectorId();
+        if (msg.sender != owner && msg.sender != reg.admin && msg.sender != reg.connectorAddress) revert AdminOnly();
+
+        uint64 fundingEpoch = IClprConnector(reg.connectorAddress).fundingEpoch();
+        ClprTypes.ClprFundingState state = IClprConnector(reg.connectorAddress).fundingState();
+        ClprTypes.ClprBalanceReport memory report = IClprConnector(reg.connectorAddress).getBalanceReport(0);
+        if (fundingEpoch > localFundingEpochByConnector[connectorId]) {
+            localFundingEpochByConnector[connectorId] = fundingEpoch;
+        }
+        _publishFundingStateUpdate(connectorId, fundingEpoch, state, report, reg);
     }
 
     /// @inheritdoc IClprMiddleware
@@ -408,7 +468,12 @@ contract ClprMiddleware is IClprMiddleware {
         bytes memory responseRouteData = _buildResponseRouteHeader(message.middlewareMessage.data);
 
         address destinationApplication = message.applicationMessage.recipientId;
-        if (destinationApplication == address(0)) revert InvalidRecipient();
+        if (destinationApplication == address(0)) {
+            ClprTypes.ClprMiddlewareStatus controlStatus;
+            (response, controlStatus) = _handleControlMessage(message, messageId, responseRouteData);
+            emit InboundMessageHandled(messageId, destinationApplication, controlStatus, message.destinationConnectorId);
+            return response;
+        }
         if (!localApplications[destinationApplication]) revert ApplicationNotRegistered();
 
         // Destination connector lookup and pairing validation.
@@ -517,7 +582,10 @@ contract ClprMiddleware is IClprMiddleware {
     /// @inheritdoc IClprMiddleware
     function handleMessageResponse(ClprTypes.ClprMessageResponse calldata response) external onlyQueueOrTrustedCallback {
         PendingOutboundMessage memory pending = pendingByMessageId[response.originalMessageId];
-        if (!pending.exists) revert UnknownMessage();
+        // Control message replies and re-deliveries have no pending application entry; return without reverting.
+        // The native ClprEndpointClient delivers replies for all message types, including control envelopes.
+        // MockClprQueue skips response delivery for control messages entirely, so only SOLO hits this path.
+        if (!pending.exists) return;
         if (!localApplications[pending.sourceApplication]) revert ApplicationNotRegistered();
 
         delete pendingByMessageId[response.originalMessageId];
@@ -601,8 +669,9 @@ contract ClprMiddleware is IClprMiddleware {
         if (!remote.known || remote.unavailable) return false;
         if (remote.availableBalance <= remote.safetyThreshold) return true;
 
-        uint256 threshold = remote.availableBalance - remote.safetyThreshold;
-        return outstandingCommitmentsByDestinationConnector[destinationConnectorId] >= threshold;
+        uint256 capacity = remote.availableBalance - remote.safetyThreshold;
+        if (remote.minimumCharge != 0 && capacity < remote.minimumCharge) return true;
+        return outstandingCommitmentsByDestinationConnector[destinationConnectorId] >= capacity;
     }
 
     function _isOutOfFunds(
@@ -676,6 +745,120 @@ contract ClprMiddleware is IClprMiddleware {
         if (middlewareResponse.status == ClprTypes.ClprMiddlewareStatus.ConnectorAbsent) {
             remote.unavailable = true;
         }
+    }
+
+    function _publishFundingStateUpdate(
+        bytes32 connectorId,
+        uint64 fundingEpoch,
+        ClprTypes.ClprFundingState state,
+        ClprTypes.ClprBalanceReport memory report,
+        ConnectorRegistration memory reg
+    ) private {
+        if (reg.remoteMiddleware == address(0)) {
+            return;
+        }
+
+        ClprTypes.ClprControlEnvelope memory envelope = ClprTypes.ClprControlEnvelope({
+            controlType: ClprTypes.ClprControlType.ConnectorFundingStateUpdate,
+            data: abi.encode(
+                ClprTypes.ClprFundingStateUpdate({
+                    connectorId: connectorId,
+                    fundingEpoch: fundingEpoch,
+                    state: state,
+                    balanceReport: report,
+                    minimumCharge: IClprConnector(reg.connectorAddress).minimumCharge(),
+                    maximumCharge: IClprConnector(reg.connectorAddress).maximumCharge()
+                })
+            )
+        });
+
+        ClprTypes.ClprMessage memory controlMessage = ClprTypes.ClprMessage({
+            senderApplicationId: address(this),
+            applicationMessage: ClprTypes.ClprApplicationMessage({
+                recipientId: address(0),
+                connectorId: connectorId,
+                maxCharge: ClprTypes.ClprAmount({value: 0, unit: report.availableBalance.unit}),
+                data: abi.encode(envelope)
+            }),
+            destinationConnectorId: reg.expectedRemoteConnectorId,
+            connectorMessage: ClprTypes.ClprConnectorMessage({
+                approve: true,
+                maxCharge: ClprTypes.ClprAmount({value: 0, unit: report.availableBalance.unit}),
+                data: bytes("")
+            }),
+            middlewareMessage: ClprTypes.ClprMiddlewareMessage({
+                balanceReport: report,
+                data: abi.encode(ROUTE_VERSION, reg.remoteLedgerId, address(this), reg.remoteMiddleware)
+            })
+        });
+
+        try IClprQueue(queue).enqueueMessage(controlMessage) returns (uint64) {
+            emit FundingControlEnqueued(connectorId, fundingEpoch, reg.remoteLedgerId);
+        } catch {}
+    }
+
+    function _handleControlMessage(
+        ClprTypes.ClprMessage calldata message,
+        uint64 messageId,
+        bytes memory responseRouteData
+    ) private returns (ClprTypes.ClprMessageResponse memory response, ClprTypes.ClprMiddlewareStatus status) {
+        status = ClprTypes.ClprMiddlewareStatus.Success;
+
+        ClprTypes.ClprControlEnvelope memory envelope = abi.decode(
+            message.applicationMessage.data,
+            (ClprTypes.ClprControlEnvelope)
+        );
+
+        if (envelope.controlType == ClprTypes.ClprControlType.ConnectorFundingStateUpdate) {
+            ClprTypes.ClprFundingStateUpdate memory update = abi.decode(
+                envelope.data,
+                (ClprTypes.ClprFundingStateUpdate)
+            );
+            _applyRemoteFundingStateUpdate(update);
+        }
+
+        response = ClprTypes.ClprMessageResponse({
+            originalMessageId: messageId,
+            applicationResponse: ClprTypes.ClprApplicationResponse({data: bytes("")}),
+            connectorResponse: ClprTypes.ClprConnectorResponse({data: bytes("")}),
+            middlewareResponse: ClprTypes.ClprMiddlewareResponse({
+                status: status,
+                minimumCharge: ClprTypes.ClprAmount({value: 0, unit: ""}),
+                maximumCharge: ClprTypes.ClprAmount({value: type(uint256).max, unit: ""}),
+                middlewareMessage: ClprTypes.ClprMiddlewareMessage({
+                    balanceReport: message.middlewareMessage.balanceReport,
+                    data: responseRouteData
+                })
+            })
+        });
+    }
+
+    function _applyRemoteFundingStateUpdate(ClprTypes.ClprFundingStateUpdate memory update) private {
+        if (update.balanceReport.connectorId != update.connectorId) {
+            return;
+        }
+        if (update.fundingEpoch <= remoteFundingEpoch[update.connectorId]) {
+            return;
+        }
+
+        remoteFundingEpoch[update.connectorId] = update.fundingEpoch;
+
+        RemoteConnectorStatus storage remote = remoteStatusByDestinationConnector[update.connectorId];
+        remote.availableBalance = update.balanceReport.availableBalance.value;
+        remote.safetyThreshold = update.balanceReport.safetyThreshold.value;
+        remote.minimumCharge = update.minimumCharge.value;
+        remote.maximumCharge = update.maximumCharge.value;
+        remote.unit = update.balanceReport.availableBalance.unit;
+        remote.known = true;
+        remote.unavailable = false;
+
+        emit RemoteFundingStateApplied(
+            update.connectorId,
+            update.fundingEpoch,
+            update.state,
+            remote.availableBalance,
+            remote.safetyThreshold
+        );
     }
 
     function _buildFailureResponse(

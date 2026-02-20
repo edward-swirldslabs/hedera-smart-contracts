@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { ClprTypes } from "../types/ClprTypes.sol";
 import { IClprConnector } from "../interfaces/IClprConnector.sol";
 import { IClprMiddleware } from "../interfaces/IClprMiddleware.sol";
+import { ClprFundingAwareConnectorBase } from "../connectors/base/ClprFundingAwareConnectorBase.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -14,7 +15,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 ///      It intentionally keeps logic simple while reflecting the spec requirements:
 ///      - authorize() approves/denies and attaches a max_charge commitment.
 ///      - handleMessage() reimburses the receiving middleware and returns an optional connector response payload.
-contract MockClprConnector is IClprConnector {
+contract MockClprConnector is IClprConnector, ClprFundingAwareConnectorBase {
     using SafeERC20 for IERC20;
 
     /// @notice Thrown when a non-admin attempts an admin-only action.
@@ -158,6 +159,7 @@ contract MockClprConnector is IClprConnector {
     /// @notice Updates the safety threshold (admin-only).
     function setSafetyThreshold(uint256 newThreshold) external onlyAdmin {
         _safetyThreshold = newThreshold;
+        reconcileFundingState();
     }
 
     /// @notice Updates the destination-side min/max charge policy (admin-only).
@@ -180,6 +182,8 @@ contract MockClprConnector is IClprConnector {
     /// @dev In the spec, connector creation is a protocol transaction; this is a prototype stand-in.
     function registerWithMiddleware(address middleware) external onlyAdmin {
         IClprMiddleware(middleware).registerConnector(connectorId, remoteLedgerId, expectedRemoteConnectorId, admin);
+        _setFundingMiddleware(middleware);
+        reconcileFundingState();
     }
 
     /// @inheritdoc IClprConnector
@@ -266,6 +270,7 @@ contract MockClprConnector is IClprConnector {
         uint256 charge = billing.charge.value;
         if (charge != 0) {
             _reimburse(msg.sender, charge);
+            reconcileFundingState();
         }
 
         // Connector-to-connector payload is optional; this prototype returns the hash of the reimbursement details.
@@ -296,6 +301,41 @@ contract MockClprConnector is IClprConnector {
         emit SendRejected(msg.sender, appMsgId, draft.destinationConnectorId, reason, side);
     }
 
+    /// @inheritdoc IClprConnector
+    function fundingState()
+        public
+        view
+        override(IClprConnector, ClprFundingAwareConnectorBase)
+        returns (ClprTypes.ClprFundingState state)
+    {
+        return super.fundingState();
+    }
+
+    /// @inheritdoc IClprConnector
+    function fundingEpoch()
+        public
+        view
+        override(IClprConnector, ClprFundingAwareConnectorBase)
+        returns (uint64 epoch)
+    {
+        return super.fundingEpoch();
+    }
+
+    /// @inheritdoc IClprConnector
+    function reconcileFundingState() public override(IClprConnector, ClprFundingAwareConnectorBase) {
+        super.reconcileFundingState();
+    }
+
+    /// @inheritdoc IClprConnector
+    function fundingHooksVersion()
+        public
+        pure
+        override(IClprConnector, ClprFundingAwareConnectorBase)
+        returns (uint32 version)
+    {
+        return super.fundingHooksVersion();
+    }
+
     function _availableBalance() private view returns (uint256) {
         if (address(token) == address(0)) {
             return address(this).balance;
@@ -315,5 +355,33 @@ contract MockClprConnector is IClprConnector {
         }
 
         emit Reimbursed(recipient, amount, keccak256(abi.encodePacked(_availableBalance(), _safetyThreshold)));
+    }
+
+    function _availableFundingBalance() internal view override returns (uint256) {
+        return _availableBalance();
+    }
+
+    function _fundingSafetyThreshold() internal view override returns (uint256) {
+        return _safetyThreshold;
+    }
+
+    function _fundingUnit() internal view override returns (string memory) {
+        return _localUnit;
+    }
+
+    function _fundingConnectorId() internal view override returns (bytes32) {
+        return connectorId;
+    }
+
+    function _fundingTokenAddress() internal view override returns (address) {
+        return address(token);
+    }
+
+    function _fundingMinimumCharge() internal view override returns (ClprTypes.ClprAmount memory amount) {
+        amount = ClprTypes.ClprAmount({value: _minimumCharge, unit: _localUnit});
+    }
+
+    function _fundingMaximumCharge() internal view override returns (ClprTypes.ClprAmount memory amount) {
+        amount = ClprTypes.ClprAmount({value: _maximumCharge, unit: _localUnit});
     }
 }

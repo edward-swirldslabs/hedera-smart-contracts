@@ -4,6 +4,7 @@ This directory is the active issue tracker for converging the current working SO
 architecture described in:
 
 - `docs/clpr/CLPR_CONSENSUS_NODE_REFACTOR_PROPOSAL.md`
+- `docs/clpr/NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md`
 
 ## Guardrails (Non-Negotiable)
 
@@ -56,3 +57,14 @@ Exit criteria per issue:
 - `ISSUE-0308-normalize-clpr-package-naming-symmetry.md` (Done)
 - `ISSUE-0309-add-todo-for-metadata-cleanup-scaling.md` (Done)
 - `ISSUE-0310-full-regression-and-solo-verification-gate.md` (Done)
+
+## Issue List (Hybrid Funding-Recovery Wave)
+
+- `ISSUE-0311-introduce-funding-control-types-and-hybrid-abi-surface.md` (Done)
+- `ISSUE-0312-add-funding-aware-connector-base-and-migrate-mock.md` (Done)
+- `ISSUE-0313-add-middleware-funding-transition-hook-and-control-message-sync.md` (Done)
+- `ISSUE-0314-integrate-remote-cache-pre-reject-with-funding-epochs.md` (Done)
+- `ISSUE-0315-expand-solo-scenario-with-topoff-and-redeplete-via-connector2.md` (Done)
+- `ISSUE-0316-add-hardhat-and-foundry-tests-for-funding-transition-recovery.md` (Done)
+- `ISSUE-0317-solo-verification-gate-for-topoff-recovery-redeplete.md` (In Progress)
+- `ISSUE-0318-adversarial-review-security-and-after-action-analysis.md` (Planned)

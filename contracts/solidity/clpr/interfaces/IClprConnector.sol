@@ -73,4 +73,17 @@ interface IClprConnector {
         ClprTypes.ClprSendFailureReason reason,
         ClprTypes.ClprSendFailureSide side
     ) external;
+
+    /// @notice Returns current funding-availability state.
+    function fundingState() external view returns (ClprTypes.ClprFundingState state);
+
+    /// @notice Returns monotonic epoch that increments on funding-state transitions.
+    function fundingEpoch() external view returns (uint64 epoch);
+
+    /// @notice Reconciles connector funding state from on-ledger balance.
+    /// @dev Needed when balance changed out-of-band (e.g. direct token transfer).
+    function reconcileFundingState() external;
+
+    /// @notice Returns the connector funding-hooks ABI version.
+    function fundingHooksVersion() external pure returns (uint32 version);
 }

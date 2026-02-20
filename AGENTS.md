@@ -104,6 +104,7 @@ Important planning notes from the spec set:
 
 Native messaging + queue system contract integration docs in this repo (SOLO-first):
 
+- `docs/clpr/NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md` (canonical test scenario behavior and expected outcomes)
 - `docs/clpr/native-messaging-solo-integration-plan/README.md`
 - `docs/clpr/native-messaging-solo-integration-plan/issues/`
 - `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md` (anti-pattern archive pointer)
@@ -115,6 +116,15 @@ Hard guardrails for this phase:
 - Cross-ledger message transport must be performed by the in-node `ClprEndpointClient`.
 - Connectors are paymasters only. Do not change connector logic for routing, transport, or delivery.
 - Avoid Solidity API changes (middleware/app/connector). If unavoidable, keep changes minimal and justify in writing.
+
+Current canonical SOLO scenario (must stay aligned unless explicitly changed by new issues):
+
+- Six sends total with connector order `1 -> 2 -> 3` on each send attempt.
+- Connector1 always denies.
+- Connector2 succeeds twice, then becomes pre-rejected due to destination threshold.
+- Connector3 handles failover sends while connector2 is underfunded.
+- Connector2 is topped off once, becomes usable for one send, then is pre-rejected again after re-depletion.
+- Cross-ledger state synchronization for funding transitions is performed by native control messaging, not polling or external pumping.
 
 Diagnostic allowances (temporary; clean up before finalizing):
 
