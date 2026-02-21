@@ -343,9 +343,10 @@ For block-stream tailing:
   - `../hiero-consensus-node`
   - `../hiero-block-node`
 
-## Related runbooks
+## Related documentation
 
-- `docs/clpr/CLPR_DEMO_OBSERVABILITY_PLAN.md`
-- `docs/clpr/BLOCK_STREAM_TAILER_RUNBOOK.md`
-- `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
-- `docs/clpr/NATIVE_MESSAGING_SOLO_AFTER_ACTION_REPORT.md`
+- `docs/clpr/README.md` (entry point)
+- `docs/clpr/ARCHITECTURE.md` (system architecture)
+- `docs/clpr/TESTING.md` (test instructions)
+- `docs/clpr/OPERATIONS.md` (operational playbook)
+- `docs/clpr/OBSERVABILITY.md` (trace inventory)

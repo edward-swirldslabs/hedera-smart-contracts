@@ -104,10 +104,11 @@ Important planning notes from the spec set:
 
 Native messaging + queue system contract integration docs in this repo (SOLO-first):
 
-- `docs/clpr/native-messaging-solo-integration-plan/README.md`
-- `docs/clpr/native-messaging-solo-integration-plan/issues/`
-- `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md` (anti-pattern archive pointer)
-- `docs/clpr/CLPR_ADVERSARIAL_REVIEW_FIX_PROPOSALS.md` (issue-ready remediation proposals derived from adversarial review)
+- `docs/clpr/README.md` (entry point and navigation)
+- `docs/clpr/ARCHITECTURE.md` (system architecture, components, message flow, guardrails)
+- `docs/clpr/TESTING.md` (all test instructions: Hardhat, Foundry, two-Solo E2E)
+- `docs/clpr/OPERATIONS.md` (operational playbook, known failures, block-stream tailer)
+- `docs/clpr/OBSERVABILITY.md` (trace inventory, temporal sequence, timing)
 
 Hard guardrails for this phase:
 
@@ -148,9 +149,8 @@ When working on native messaging + queue integration, read these docs after the 
   - `README.md`
   - `TEST_SETUP.md`
   - `test/README.md`
-  - `docs/clpr/block-node-solo-viability-2026-02-16.md`
-  - `docs/clpr/CLPR_DEMO_OBSERVABILITY_PLAN.md`
-  - `docs/clpr/BLOCK_STREAM_TAILER_RUNBOOK.md`
+  - `docs/clpr/OPERATIONS.md`
+  - `docs/clpr/OBSERVABILITY.md`
   - `scripts/clpr/README.md`
 
 Local implementation reference (important when debugging “EVM behavior” questions):
@@ -425,7 +425,7 @@ bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
 
 Operational runbook for agents:
 
-- `docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
+- `docs/clpr/OPERATIONS.md`
 
 Quarantine (historical anti-pattern archive; reference only):
 
@@ -442,8 +442,8 @@ If mirror is explicitly in scope:
 Recommended resume sequence:
 
 1. Re-read guardrails:
-   - `docs/clpr/native-messaging-solo-integration-plan/README.md`
-   - `docs/clpr/native-messaging-solo-integration-plan/issues/README.md`
+   - `docs/clpr/ARCHITECTURE.md` (hard guardrails section)
+   - `docs/clpr/TESTING.md` (test instructions)
 2. Re-run local smart-contract tests:
    - `npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat`
    - `forge test --match-path test/foundry/ClprMiddleware.t.sol`

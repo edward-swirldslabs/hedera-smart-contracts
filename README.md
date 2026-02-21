@@ -49,63 +49,26 @@ This project is set up using the Hardhat development environment. To get started
 
 For using this project as a library in a Foundry project see [Foundry Testing](FOUNDRY_TESTING.md)
 
-## CLPR Middleware (Prototype)
+## CLPR Middleware
 
-This repository includes a Solidity prototype of the CLPR middleware layered on top of a mock messaging queue.
-The implementation is intentionally incremental and should stay aligned with the spec in PR `hiero-ledger/hiero-consensus-node#23333`
-(docs under `hedera-node/docs/clpr/` in that PR).
+This repository includes the CLPR (Cross-Ledger Protocol Relay) Solidity middleware with native messaging integration validated end-to-end across two Solo ledgers.
 
-The CLPR prototype lives under:
-
-- `contracts/solidity/clpr/`
-- `test/solidity/clpr/` (Hardhat)
-- `test/foundry/` (Foundry)
-
-Current capabilities (keep this list updated as the code evolves):
-
-- Message envelopes aligned to the current spec intent (`ClprMessageDraft`, `ClprMessage`, `ClprMessageResponse`)
-- Application allow-list registration (`registerLocalApplication`) and per-application message ids (`appMsgId`)
-- Connector registration + pairing (local connector id mapped to an expected remote connector id)
-- Source send path: connector `authorize(...)` hook before enqueue, plus max-charge commitment tracking
-- Destination receive path: destination connector funds check using available balance minus safety threshold vs minimum charge
-  - If underfunded: do not execute the destination application; return `ConnectorOutOfFunds`
-  - If funded: execute destination application and reimburse middleware via the destination connector
-- Remote status propagation via balance reports in responses; source middleware can reject sends pre-enqueue when the
-  latest-known remote connector status is out-of-funds
-- Reference app-level connector preference + failover behavior in `SourceApplication`
-
-Not yet modeled here (planned per spec): proofs, bundle formats, and integration with a real messaging layer.
+Source code: `contracts/solidity/clpr/` | Documentation: `docs/clpr/README.md`
 
 ### CLPR tests
 
-Hardhat (in-process ephemeral chain):
-
 ```bash
+# Hardhat (single-ledger)
 npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat
-```
 
-Two-network (bridged) test (requires two running Solo deployments with two reachable JSON-RPC endpoints):
-
-```bash
-export CLPR_SRC_RPC_URL=http://127.0.0.1:7546
-export CLPR_DST_RPC_URL=http://127.0.0.1:7547
-export CLPR_PRIVATE_KEY=<0x...>
-
-npx hardhat test test/network/clpr/clprBridgeRelayedQueue.js --network hardhat
-```
-
-Foundry:
-
-```bash
+# Foundry (single-ledger)
 forge test --match-path test/foundry/ClprMiddleware.t.sol
+
+# Two-Solo E2E (native messaging, no external pump)
+bash scripts/clpr/native-messaging-solo/run-e2e.sh
 ```
 
-SOLO (native messaging + native queue, two ledgers):
-
-- Active plan: `docs/clpr/native-messaging-solo-integration-plan/README.md`
-- Quarantined anti-pattern archive (external pump): `docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
-
-For SOLO notes and CLI runbooks used during integration debugging, see `AGENTS.md`.
+See `docs/clpr/TESTING.md` for prerequisites, step-by-step setup, and troubleshooting.
 
 ## Support
 

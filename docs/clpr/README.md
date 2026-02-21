@@ -1,120 +1,71 @@
-# CLPR Docs
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
-This folder contains CLPR middleware design notes, reports, operational troubleshooting, and SOLO-first native messaging integration planning.
+# CLPR (Cross-Ledger Protocol Relay)
 
-## Documents
+CLPR enables cross-ledger request/response messaging between independent Hedera/Hiero ledgers. The Solidity middleware handles application routing, connector authorization, and failover policy. A queue system contract at `0x16e` bridges EVM calls into the native CLPR queue, and the in-node `ClprEndpointClient` transports message bundles between ledgers over gRPC with no external pump or relay process.
 
-- `CLPR_CONSENSUS_NODE_REFACTOR_PROPOSAL.md`
-  - Proposed corrected architecture for CLPR native messaging integration in `../hiero-consensus-node`.
-- `CLPR_MIDDLEWARE_OVERVIEW.md`
-  - High-level overview of the current CLPR middleware implementation, contract layout, and test strategy.
-- `CLPR_DEMO_REPORT_2026-02-11.md`
-  - Comprehensive demo report covering middleware behavior, single-ledger and two-ledger test flows, and framework comparison.
-- `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
-  - Detailed troubleshooting log for running two Solo networks with a bridged CLPR scenario.
-- `ODIN_HARP_VS_JSONRPC_RELAY.md`
-  - Comparison of ODIN/HARP (HAPI-first) versus JSON-RPC-relay-centric test paths.
-- `native-messaging-solo-integration-plan/README.md`
-  - Active plan for SOLO-first integration using the in-node native messaging layer and `ClprEndpointClient` (no external pump).
-- `native-messaging-solo-integration-plan/issues/`
-  - Active issue set for reaching the corrected SOLO integration target state.
-- `NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
-  - Pointer to the quarantined pump-based native-queue plan and associated scripts (anti-pattern archive).
-- `NATIVE_MESSAGING_SOLO_AFTER_ACTION_REPORT.md`
-  - After action report explaining what was built, why it differs from the pump-based attempt, and how to run the scenario.
-- `CLPR_DEMO_OBSERVABILITY_PLAN.md`
-  - End-to-end observability map with the authoritative trace inventory table (Solidity, native Java, mirror, and block-stream signals).
-- `CLPR_ADVERSARIAL_REVIEW_FIX_PROPOSALS.md`
-  - File-level remediation proposals derived from adversarial review findings, intended as issue-creation input.
-- `block-node-solo-viability-2026-02-16.md`
-  - Current-state findings for CN->BN->MN in Solo and required wiring caveats.
-- `BLOCK_STREAM_TAILER_RUNBOOK.md`
-  - Operational runbook for live BN subscriber feeds and CLPR relevance metadata artifacts.
-- `../../scripts/clpr/README.md`
-  - Script-level operator guide for all `scripts/clpr/` workflows, options, env vars, and manual phase execution.
-- `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
-  - Deterministic clean-rerun procedure, validation checklist, and common failure fixes for reusable agent workflows.
+**Current implementation status**: IT1-CONN-AUTH iteration — connector registration, authorization, failover, and funds exhaustion behavior validated end-to-end across two Solo ledgers using native messaging.
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture: Solidity components, consensus node components, message flow, wire encoding, hard guardrails |
+| [TESTING.md](TESTING.md) | All test instructions: Hardhat, Foundry, and two-Solo E2E native messaging test with step-by-step setup |
+| [OPERATIONS.md](OPERATIONS.md) | Operational playbook: clean rerun procedures, known failure signatures, block-stream tailer, block node config, JSON-RPC relay notes |
+| [OBSERVABILITY.md](OBSERVABILITY.md) | Trace inventory: EVM events, consensus node logs, block-stream feed, temporal sequence, timing expectations |
 
 ## Source Code Map
 
-- Contracts: `contracts/solidity/clpr/`
-- Hardhat tests: `test/solidity/clpr/` and `test/network/clpr/`
-- Foundry tests: `test/foundry/`
-- Helper scripts: `scripts/` (CLPR-specific guide: `scripts/clpr/README.md`)
+| Location | Content |
+|---|---|
+| `contracts/solidity/clpr/` | Solidity middleware, apps, connectors, mocks, types, interfaces ([contract README](../../contracts/solidity/clpr/README.md)) |
+| `test/solidity/clpr/` | Hardhat integration tests |
+| `test/foundry/ClprMiddleware.t.sol` | Foundry unit tests |
+| `test/network/clpr/` | Two-network bridged test (JSON-RPC relay path) |
+| `scripts/clpr/` | E2E runner, bring-up/teardown, config exchange, block-stream tailer ([script README](../../scripts/clpr/README.md)) |
+| `tools/clpr/` | Config exchange Java tool |
+| `../hiero-consensus-node/` | Queue system contract, native messaging, bundle processing (branch `23652-clpr-middleware-integration`) |
 
-## Regression Commands
+## Quick Start: Run Tests
 
-Hedera-smart-contracts:
+### Single-ledger (fast)
 
 ```bash
-# Hardhat (single in-process chain)
+# Hardhat
 npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat
-
-# Hardhat (two-network bridged queue, JSON-RPC relay based)
-npx hardhat test test/network/clpr/clprBridgeRelayedQueue.js --network hardhat
 
 # Foundry
 forge test --match-path test/foundry/ClprMiddleware.t.sol
-
-# Solo (native queue, two ledgers, HAPI/gRPC only)
-# Full build + deploy + kick + scenario + teardown:
-bash scripts/clpr/native-messaging-solo/run-e2e.sh
-
-# Clean rerun baseline used for deterministic verification:
-# CLPR_SOLO_HOME=$HOME/.solo-integration SOLO_HOME=$HOME/.solo-integration \
-# SOLO_SKIP_CLUSTER_SETUP=true SOLO_ENABLE_BLOCK_NODE=true SOLO_ENABLE_MIRROR=false \
-# bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
-#
-# Useful options:
-# bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
-# bash scripts/clpr/native-messaging-solo/run-e2e.sh --keep
-# Disable block-stream tailer if you only want scenario execution:
-# CLPR_ENABLE_BLOCK_STREAM_TAILER=false bash scripts/clpr/native-messaging-solo/run-e2e.sh
-#
-# Script structure:
-# - scripts/clpr/native-messaging-solo/run-e2e.sh (orchestrator)
-# - scripts/clpr/native-messaging-solo/run-e2e-phases.sh (phase functions)
-#
-# The prior pump-based smoke runner was quarantined as an anti-pattern.
-# See:
-# - docs/clpr/NATIVE_QUEUE_INTEGRATION_QUARANTINED.md
-# - docs/clpr/native-messaging-solo-integration-plan/README.md
-# - docs/clpr/NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md
 ```
 
-Consensus node sibling repo (`../hiero-consensus-node`) (examples; quote `--tests` patterns to avoid shell expansion):
+### Two-Solo E2E (native messaging)
+
+```bash
+# Full run (build + deploy + scenario + teardown)
+bash scripts/clpr/native-messaging-solo/run-e2e.sh
+
+# Fast rerun (skip consensus node rebuild)
+bash scripts/clpr/native-messaging-solo/run-e2e.sh --no-build
+```
+
+See [TESTING.md](TESTING.md) for prerequisites, environment variables, and troubleshooting.
+
+## Key Operational Notes
+
+- The gRPC/native messaging path is the reliable baseline for multi-ledger testing. JSON-RPC relay depends on Mirror Node ingestion, which can stall independently of consensus node health.
+- Solo cluster context defaults to `docker-desktop`. If using a Kind cluster, set `SOLO_CLUSTER_CONTEXT=kind-<name>`.
+- Block-stream tailers require `SOLO_ENABLE_BLOCK_NODE=true`. If block node is not needed, disable both: `SOLO_ENABLE_BLOCK_NODE=false CLPR_ENABLE_BLOCK_STREAM_TAILER=false`.
+- See [OPERATIONS.md](OPERATIONS.md) for known failure signatures and fixes.
+
+## Consensus Node Regression Commands
 
 ```bash
 cd ../hiero-consensus-node
 
-# Unit-level handler/regression battery (targeted example)
+# Unit tests (targeted)
 ./gradlew :hiero-clpr-interledger-service-impl:test --tests '*ClprProcessMessageBundleHandlerTest*' --no-daemon
 
-# HapiTest (subprocess, targeted suite examples)
+# HapiTest suite
 ./gradlew :test-clients:testSubprocess --tests 'com.hedera.services.bdd.suites.interledger.ClprMessagesSuite' --rerun-tasks --no-daemon
 ```
-
-## Middleware Callback Authorization Model
-
-Middleware callback entrypoints must only accept calls from the queue system contract (native queue) and may optionally
-allow an explicit trusted caller for local test harnesses:
-
-- Queue address: system contract at `0x16E` (native queue adapter)
-- Optional additional caller: `ClprMiddleware.trustedCallbackCaller`
-
-## Known Limitations / Known Environment Noise
-
-- Solo local-build dev mode can show control-plane/runtime drift; control-plane phase may read `configured` even when
-  pods/JVM/gRPC are healthy.
-- gRPC port-forwarding can transiently drop under load; polling helpers should treat transport hiccups as retryable.
-- Gradle subprocess startup may intermittently fail with `NoSuchFileException: build/<network>-test/node0/output/hgcaa.log`;
-  mitigation: re-run with `--rerun-tasks` and/or delete `hedera-node/build/*-test` directories before rerunning.
-
-## Recommended Reading Order
-
-1. `CLPR_MIDDLEWARE_OVERVIEW.md`
-2. `native-messaging-solo-integration-plan/README.md`
-3. `NATIVE_QUEUE_INTEGRATION_QUARANTINED.md`
-4. `SOLO_TWO_NETWORK_CLPR_BRIDGE_NOTES.md`
-5. `ODIN_HARP_VS_JSONRPC_RELAY.md`
-6. `NATIVE_MESSAGING_SOLO_CLEAN_RERUN_PLAYBOOK.md`
