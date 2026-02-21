@@ -21,7 +21,9 @@ Defines where observability signals exist and their expected temporal order for 
 | Middleware | `middleware/ClprMiddleware.sol` | `OutboundMessageEnqueued` | Present |
 | Middleware | `middleware/ClprMiddleware.sol` | `InboundMessageHandled` | Present |
 | Middleware | `middleware/ClprMiddleware.sol` | `InboundResponseHandled`, `RemoteStatusUpdated` | Present |
+| Middleware | `middleware/ClprMiddleware.sol` | `FundingControlEnqueued`, `RemoteFundingStateApplied` | Present |
 | Echo app | `apps/EchoApplication.sol` | `MessageHandled` | Present |
+| Connector base | `connectors/base/ClprFundingAwareConnectorBase.sol` | `FundingDeposited`, `FundingStateTransition`, `FundingNotifiedMiddleware` | Present |
 
 ## Consensus Node Observability
 
@@ -63,6 +65,11 @@ CLPR_OBS|component=<name>|stage=<stage>|ledger=<hex4>|messageId=<id>|appMsgId=<i
 | EVM event | `InboundMessageHandled` | `ClprMiddleware.sol` | Mirror REST logs query | `messageId` |
 | EVM event | `InboundResponseHandled` | `ClprMiddleware.sol` | Mirror REST logs query | `messageId`, `appMsgId` |
 | EVM event | `RemoteStatusUpdated` | `ClprMiddleware.sol` | Mirror REST logs query | destination connector id |
+| EVM event | `FundingControlEnqueued` | `ClprMiddleware.sol` | Mirror REST logs query | connector id, funding epoch |
+| EVM event | `RemoteFundingStateApplied` | `ClprMiddleware.sol` | Mirror REST logs query | connector id, funding epoch, state |
+| EVM event | `FundingDeposited` | `ClprFundingAwareConnectorBase.sol` | Mirror REST logs query | amount, new balance |
+| EVM event | `FundingStateTransition` | `ClprFundingAwareConnectorBase.sol` | Mirror REST logs query | old state, new state, epoch |
+| EVM event | `FundingNotifiedMiddleware` | `ClprFundingAwareConnectorBase.sol` | Mirror REST logs query | connector id, success |
 | Node log | `CLPR_OBS\|component=clpr_queue_enqueue_message_call` | `ClprQueueEnqueueMessageCall.java` | `hgcaa-*.log` | `remoteLedgerId`, `messageId` |
 | Node log | `CLPR_OBS\|component=clpr_queue_enqueue_message_response_call` | `ClprQueueEnqueueMessageResponseCall.java` | `hgcaa-*.log` | `originalMessageId`, response `messageId` |
 | Node log | `CLPR_OBS\|component=clpr_queue_deliver_inbound_message_call` | `ClprQueueDeliverInboundMessageCall.java` | `hgcaa-*.log` | `inboundMessageId`, callback status |
@@ -101,7 +108,7 @@ Expected order for one **successful** message round trip:
 18. Source app emits `ResponseReceived`
 19. Scenario runner prints `Scenario passed`
 
-### Failover Sequence (Messages 3-4)
+### Failover Sequence (Messages 3, 4, and 6)
 
 When connector 2 is known out-of-funds:
 
@@ -110,17 +117,28 @@ When connector 2 is known out-of-funds:
 3. Connector 3: `Authorized(approve=true)` → `SendAttempted(Accepted)`
 4. Normal round-trip follows
 
-### Expected Event Counts (4-Message Scenario)
+### Top-Off Recovery Sequence (Between Messages 4 and 5)
+
+1. Destination connector 2 receives `depositToken(50)` → balance increases above safety threshold
+2. `ClprFundingAwareConnectorBase` detects `Underfunded → Available` transition, increments epoch
+3. Base connector calls `IClprMiddleware.onConnectorFundingStateTransition(...)` on destination middleware
+4. Destination middleware builds `ClprControlEnvelope` with `ClprFundingStateUpdate` and enqueues to source
+5. Source `ClprEndpointClient` delivers the control message
+6. Source middleware applies the funding epoch update — connector 2 is usable again
+
+### Expected Event Counts (6-Message Top-Off/Re-Deplete Scenario)
 
 | Event | Expected Count |
 |---|---|
-| `SourceApplication.SendAttempted` | 10 |
-| `SourceApplication.ResponseReceived` | 4 |
-| `MockClprConnector.Authorized` (source) | 8 (c1=4, c2=2, c3=2) |
-| `MockClprConnector.SendRejected` (source c2) | 2 |
-| `ClprMiddleware.OutboundMessageEnqueued` | 4 |
-| `EchoApplication.MessageHandled` | 4 |
-| `ClprMiddleware.InboundResponseHandled` | 4 |
+| `SourceApplication.SendAttempted` | 15 |
+| `SourceApplication.ResponseReceived` | 6 |
+| `MockClprConnector.Authorized` (source) | 12 (c1=6, c2=3, c3=3) |
+| `MockClprConnector.SendRejected` (source c2) | 3 |
+| `ClprMiddleware.OutboundMessageEnqueued` | 6 |
+| `EchoApplication.MessageHandled` | 6 |
+| `ClprMiddleware.InboundResponseHandled` | 6 |
+| `ClprMiddleware.FundingControlEnqueued` | 3 |
+| `ClprMiddleware.RemoteFundingStateApplied` | 3 |
 
 ## Timing Expectations
 

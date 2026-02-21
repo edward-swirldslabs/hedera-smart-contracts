@@ -27,6 +27,11 @@
   },
   {
     "inputs": [],
+    "name": "ConnectorOnly",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidAdmin",
     "type": "error"
   },
@@ -189,6 +194,31 @@
     "inputs": [
       {
         "indexed": true,
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "fundingEpoch",
+        "type": "uint64"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "remoteLedgerId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "FundingControlEnqueued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint64",
         "name": "messageId",
         "type": "uint64"
@@ -257,6 +287,31 @@
     "inputs": [
       {
         "indexed": true,
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "fundingEpoch",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum ClprTypes.ClprFundingState",
+        "name": "state",
+        "type": "uint8"
+      }
+    ],
+    "name": "LocalFundingTransitionObserved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint64",
         "name": "appMsgId",
         "type": "uint64"
@@ -299,6 +354,43 @@
       }
     ],
     "name": "OutboundMessageEnqueued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "destinationConnectorId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "fundingEpoch",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum ClprTypes.ClprFundingState",
+        "name": "state",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "availableBalance",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "safetyThreshold",
+        "type": "uint256"
+      }
+    ],
+    "name": "RemoteFundingStateApplied",
     "type": "event"
   },
   {
@@ -968,6 +1060,25 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "localFundingEpochByConnector",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "",
         "type": "address"
@@ -982,6 +1093,92 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "fundingEpoch",
+        "type": "uint64"
+      },
+      {
+        "internalType": "enum ClprTypes.ClprFundingState",
+        "name": "state",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "connectorId",
+            "type": "bytes32"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "value",
+                "type": "uint256"
+              },
+              {
+                "internalType": "string",
+                "name": "unit",
+                "type": "string"
+              }
+            ],
+            "internalType": "struct ClprTypes.ClprAmount",
+            "name": "availableBalance",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "value",
+                "type": "uint256"
+              },
+              {
+                "internalType": "string",
+                "name": "unit",
+                "type": "string"
+              }
+            ],
+            "internalType": "struct ClprTypes.ClprAmount",
+            "name": "safetyThreshold",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "value",
+                "type": "uint256"
+              },
+              {
+                "internalType": "string",
+                "name": "unit",
+                "type": "string"
+              }
+            ],
+            "internalType": "struct ClprTypes.ClprAmount",
+            "name": "outstandingCommitments",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct ClprTypes.ClprBalanceReport",
+        "name": "report",
+        "type": "tuple"
+      }
+    ],
+    "name": "onConnectorFundingStateTransition",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1080,6 +1277,19 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "connectorId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "publishConnectorFundingState",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "queue",
     "outputs": [
@@ -1131,6 +1341,25 @@
     "name": "registerLocalApplication",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "remoteFundingEpoch",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

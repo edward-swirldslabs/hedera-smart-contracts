@@ -20,6 +20,24 @@ library ClprTypes {
     }
 
     // -------------------------------------------------------------------------
+    // Funding-control plane
+    // -------------------------------------------------------------------------
+
+    /// @notice Middleware control message type carried in opaque payload bytes.
+    enum ClprControlType {
+        None,
+        ConnectorFundingStateUpdate,
+        ConnectorFundingStateQuery,
+        ConnectorFundingStateAck
+    }
+
+    /// @notice Coarse connector funding availability state.
+    enum ClprFundingState {
+        Underfunded,
+        Available
+    }
+
+    // -------------------------------------------------------------------------
     // Application layer (MVP-shape, simplified for Solidity)
     // -------------------------------------------------------------------------
 
@@ -116,6 +134,22 @@ library ClprTypes {
         ClprAmount availableBalance;
         ClprAmount safetyThreshold;
         ClprAmount outstandingCommitments;
+    }
+
+    /// @notice Funding-state update payload sent between middleware instances.
+    struct ClprFundingStateUpdate {
+        bytes32 connectorId;
+        uint64 fundingEpoch;
+        ClprFundingState state;
+        ClprBalanceReport balanceReport;
+        ClprAmount minimumCharge;
+        ClprAmount maximumCharge;
+    }
+
+    /// @notice Generic middleware control envelope.
+    struct ClprControlEnvelope {
+        ClprControlType controlType;
+        bytes data;
     }
 
     /// @notice Middleware-to-middleware message metadata.

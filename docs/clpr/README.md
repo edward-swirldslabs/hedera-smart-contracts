@@ -4,7 +4,7 @@
 
 CLPR enables cross-ledger request/response messaging between independent Hedera/Hiero ledgers. The Solidity middleware handles application routing, connector authorization, and failover policy. A queue system contract at `0x16e` bridges EVM calls into the native CLPR queue, and the in-node `ClprEndpointClient` transports message bundles between ledgers over gRPC with no external pump or relay process.
 
-**Current implementation status**: IT1-CONN-AUTH iteration — connector registration, authorization, failover, and funds exhaustion behavior validated end-to-end across two Solo ledgers using native messaging.
+**Current implementation status**: IT1-CONN-AUTH iteration with funding-aware connector recovery — connector registration, authorization, failover, funds exhaustion, top-off recovery, and re-depletion behavior validated end-to-end across two Solo ledgers using native messaging (6-message scenario).
 
 ## Documentation
 
@@ -14,6 +14,9 @@ CLPR enables cross-ledger request/response messaging between independent Hedera/
 | [TESTING.md](TESTING.md) | All test instructions: Hardhat, Foundry, and two-Solo E2E native messaging test with step-by-step setup |
 | [OPERATIONS.md](OPERATIONS.md) | Operational playbook: clean rerun procedures, known failure signatures, block-stream tailer, block node config, JSON-RPC relay notes |
 | [OBSERVABILITY.md](OBSERVABILITY.md) | Trace inventory: EVM events, consensus node logs, block-stream feed, temporal sequence, timing expectations |
+| [NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md](NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md) | Canonical test scenario: 6-message sequence, expected counters/balances, operator commands |
+| [CLPR_REQUIREMENTS_DEEP_COMPARISON_2026-02-18.md](CLPR_REQUIREMENTS_DEEP_COMPARISON_2026-02-18.md) | Requirements gap analysis against PR #23333 specification |
+| [native-messaging-solo-integration-plan/](native-messaging-solo-integration-plan/README.md) | Active integration plan and issue tracker |
 
 ## Source Code Map
 

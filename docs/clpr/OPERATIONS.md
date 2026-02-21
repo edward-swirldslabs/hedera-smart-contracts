@@ -2,7 +2,7 @@
 
 # CLPR Operations
 
-Operational playbook for running, debugging, and maintaining the CLPR two-ledger native messaging scenario.
+Operational playbook for running, debugging, and maintaining the CLPR two-ledger native messaging scenario (6-message top-off/re-deplete flow).
 
 ## Clean Rerun Playbook
 

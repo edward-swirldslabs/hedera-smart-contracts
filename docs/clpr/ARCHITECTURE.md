@@ -39,11 +39,12 @@ Source root: `contracts/solidity/clpr/`
 | Middleware | `middleware/ClprMiddleware.sol` | Registers apps/connectors, handles send/receive flows, tracks remote connector status, enforces funds policy |
 | Source App | `apps/SourceApplication.sol` | Sends messages through middleware with connector preference ordering and failover (`sendWithFailoverFromFirst`) |
 | Echo App | `apps/EchoApplication.sol` | Reference destination app for request/response validation |
-| Mock Connector | `mocks/MockClprConnector.sol` | Connector mock for authorization, balance reporting, reimbursement |
+| Funding-Aware Base | `connectors/base/ClprFundingAwareConnectorBase.sol` | Abstract base for connectors with threshold-driven funding state machine, deposit APIs, epoch tracking, and middleware notification |
+| Mock Connector | `mocks/MockClprConnector.sol` | Connector mock inheriting `ClprFundingAwareConnectorBase` for authorization, balance reporting, reimbursement |
 | Mock Queue | `mocks/MockClprQueue.sol` | Single-ledger queue mock for deterministic async-style testing |
 | Mock Relayed Queue | `mocks/MockClprRelayedQueue.sol` | Two-ledger queue mock used with an off-chain relayer (legacy path) |
-| Types | `types/ClprTypes.sol` | Canonical message/response envelope structs |
-| Interfaces | `interfaces/IClprMiddleware.sol`, `interfaces/IClprQueue.sol` | ABI interfaces |
+| Types | `types/ClprTypes.sol` | Canonical message/response envelope structs, control envelope types, funding state types |
+| Interfaces | `interfaces/IClprMiddleware.sol`, `interfaces/IClprQueue.sol`, `interfaces/IClprConnector.sol` | ABI interfaces including funding hooks |
 
 ### Core Solidity Flow
 
@@ -55,14 +56,34 @@ Source root: `contracts/solidity/clpr/`
 6. Destination app handles the message (or middleware returns connector failure status).
 7. Response returns to source middleware, which updates remote status cache and delivers to source app.
 
-### Current Behavioral Focus (IT1-CONN-AUTH)
+### Current Behavioral Focus (IT1-CONN-AUTH + Funding Recovery)
 
 - Connector registration and remote pairing semantics
 - Source-side authorization before enqueue
 - Destination-side safety threshold and minimum charge checks
 - Remote balance/policy propagation in response handling
-- Source-side pre-enqueue rejection when remote connector is known out-of-funds
+- Source-side pre-enqueue rejection when remote connector is known out-of-funds (epoch-aware)
 - Connector preference and failover in the source app
+- Funding-aware connector base with deposit APIs and threshold-driven state machine
+- Cross-ledger funding state synchronization via control envelopes (no polling or external pump)
+- Top-off recovery: destination connector topped up → state transition published → source cache updated → connector usable again
+- Re-depletion: connector exhausts funds again → new transition → source pre-rejects again
+
+### Funding Control Plane
+
+Connectors inherit `ClprFundingAwareConnectorBase` which implements a two-state funding model (`Available` / `Underfunded`) with a monotonic `fundingEpoch` counter. When a connector's available balance crosses the safety threshold:
+
+1. **Connector detects transition**: `ClprFundingAwareConnectorBase` re-evaluates state after deposits or reimbursements.
+2. **Connector notifies local middleware**: Calls `IClprMiddleware.onConnectorFundingStateTransition(connectorId, epoch, state, balanceReport)`.
+3. **Middleware enqueues control message**: Builds a `ClprControlEnvelope` wrapping a `ClprFundingStateUpdate` and enqueues it to the remote middleware via the normal queue path.
+4. **Remote middleware applies update**: On the source side, `_applyRemoteFundingStateUpdate` updates the remote connector cache with epoch ordering (stale/duplicate epochs are ignored).
+5. **Pre-reject uses updated cache**: Source middleware `_isRemoteOutOfFunds` checks the cached remote funding state before allowing enqueue.
+
+Control types (`ClprTypes.sol`):
+- `ClprControlType`: `ConnectorFundingStateUpdate`, `ConnectorFundingStateQuery`, `ConnectorFundingStateAck`
+- `ClprFundingState`: `Underfunded`, `Available`
+- `ClprFundingStateUpdate`: full payload with `connectorId`, `fundingEpoch`, `state`, `balanceReport`, charge bounds
+- `ClprControlEnvelope`: generic wrapper for typed control messages in `middlewareMessage.data`
 
 ## Consensus Node Components
 

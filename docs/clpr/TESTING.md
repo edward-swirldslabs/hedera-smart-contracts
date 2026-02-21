@@ -20,7 +20,7 @@ npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat
 - `rejects echo app deployment with zero middleware address` — constructor validation
 - `allows configured trusted callback caller in addition to queue` — `trustedCallbackCaller` authorization for native bundle dispatch path
 - `rejects direct queue enqueue calls from non-middleware callers` — access control on mock queue
-- `sends 3 messages with connector preference + failover and enforces destination funds safety threshold` — the main behavioral test: connector 1 denies, connector 2 accepts then runs out of funds, middleware pre-rejects based on cached remote status, connector 3 picks up
+- `sends 6 messages with topoff recovery and re-deplete behavior on connector2` — the main behavioral test: connector 1 always denies, connector 2 accepts then exhausts funds, middleware pre-rejects, connector 3 picks up, then connector 2 is topped off and recovers for one more send before re-depleting. Validates funding epoch transitions, control message propagation, and final balance/counter assertions.
 
 **What you'll see**: Hardhat compiles contracts (first run takes ~30s, subsequent runs use cache), then runs the test suite. Output looks like:
 
@@ -29,7 +29,7 @@ npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat
     ✓ rejects middleware deployment with zero queue address
     ✓ rejects source app deployment with zero middleware address
     ...
-    ✓ sends 3 messages with connector preference + failover...
+    ✓ sends 6 messages with topoff recovery and re-deplete behavior on connector2
 
   6 passing (Xs)
 ```
@@ -42,7 +42,7 @@ A passing run takes ~5-15 seconds after compilation.
 forge test --match-path test/foundry/ClprMiddleware.t.sol
 ```
 
-**What it tests**: The same behavioral coverage as Hardhat — constructor validation, trusted callback caller, connector failover and funds policy — at the Solidity/unit level using Foundry's VM.
+**What it tests**: The same behavioral coverage as Hardhat — constructor validation, trusted callback caller, 6-message connector failover with topoff recovery and re-depletion, funding epoch assertions — at the Solidity/unit level using Foundry's VM.
 
 **What you'll see**: Foundry compiles and runs the test functions. Output looks like:
 
@@ -73,12 +73,15 @@ This is the primary validation: two independent Solo ledgers communicating via t
 1. Deploys two Solo consensus node networks (source + destination) with a custom consensus node build that includes the CLPR queue system contract at `0x16e`.
 2. Performs a one-time `ClprLedgerConfiguration` exchange between ledgers (the only allowed external "kick").
 3. Deploys CLPR middleware, connectors, and apps to both ledgers.
-4. Sends 4 cross-ledger messages through the connector failover scenario:
-   - **Message 1**: Connector 1 denies authorization → Connector 2 accepts → round-trip succeeds. The request travels from source to destination via `ClprEndpointClient` gRPC, destination middleware calls `EchoApplication.handleMessage(...)`, and the response returns the same way.
-   - **Message 2**: Same as message 1. Destination connector 2's funds decrease further (reimbursement deducts from balance).
-   - **Message 3**: Connector 1 denies → source middleware checks cached remote status from message 2's response and learns connector 2 is out-of-funds → pre-rejects connector 2 before even calling the queue → Connector 3 accepts → round-trip succeeds via connector 3.
-   - **Message 4**: Same failover path to Connector 3 → round-trip succeeds.
-5. Asserts all round-trips complete correctly and writes `Scenario passed` to `scenario.log`.
+4. Sends 6 cross-ledger messages through the connector failover + funding recovery scenario:
+   - **Messages 1-2** (Phase 1): Connector 1 denies → Connector 2 accepts → round-trip succeeds. After 2 messages, destination connector 2 balance drops to the safety threshold (60 WETH). A funding state transition (`Underfunded`, epoch 1) is published to source middleware via control message.
+   - **Messages 3-4** (Phase 2): Source middleware pre-rejects connector 2 (cached `Underfunded` state) → Connector 3 accepts → round-trips succeed via connector 3.
+   - **Top-off** (Phase 3): Destination connector 2 receives +50 WETH via `depositToken(50)`. Funding state transitions `Underfunded → Available` (epoch 2). Destination middleware publishes control update to source. Source middleware applies it — connector 2 is usable again.
+   - **Messages 5-6** (Phase 4): Message 5 uses connector 2 (recovered, balance 110 → 60). Depletion triggers epoch 3. Message 6 pre-rejects connector 2 again → connector 3 accepts.
+5. Asserts all round-trips complete correctly: 6 responses received, connector authorize counts (c1=6, c2=3, c3=3), 3 pre-reject notifications on connector 2, destination connector 2 balance back at 60, destination connector 3 balance at 350, remote funding epoch at 3.
+6. Writes `Scenario passed` to `scenario.log`.
+
+See [NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md](NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md) for the canonical scenario specification with exact counters and balances.
 
 ### Prerequisites
 

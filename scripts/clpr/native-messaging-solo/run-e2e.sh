@@ -19,7 +19,7 @@ Runs the full two-ledger SOLO scenario using native CLPR messaging (ClprEndpoint
 2) Deploy two SOLO networks (source + destination)
 3) Port-forward gRPC endpoints to localhost
 4) Perform the one-time CLPR config exchange "kick" (and wait for queue metadata initialization)
-5) Deploy contracts to both ledgers and run the connector failover + funds depletion scenario
+5) Deploy contracts to both ledgers and run the connector failover + topoff/re-deplete scenario
 6) Stream block-node metadata in parallel (CLPR relevance scan)
 7) Collect evidence and teardown
 
@@ -89,9 +89,19 @@ done
 
 require_prereqs
 
-# For this end-to-end runner, default to CN->BN->MN topology unless explicitly disabled by caller.
-SOLO_ENABLE_BLOCK_NODE="${SOLO_ENABLE_BLOCK_NODE:-true}"
-SOLO_ENABLE_MIRROR="${SOLO_ENABLE_MIRROR:-true}"
+# For this end-to-end runner, default to CN->BN->MN topology.
+# `lib.sh` initializes these toggles to "false" for generic tooling, so detect whether the caller explicitly
+# provided an environment override via `printenv` before applying this runner's defaults.
+if printenv SOLO_ENABLE_BLOCK_NODE >/dev/null 2>&1; then
+  SOLO_ENABLE_BLOCK_NODE="${SOLO_ENABLE_BLOCK_NODE}"
+else
+  SOLO_ENABLE_BLOCK_NODE="true"
+fi
+if printenv SOLO_ENABLE_MIRROR >/dev/null 2>&1; then
+  SOLO_ENABLE_MIRROR="${SOLO_ENABLE_MIRROR}"
+else
+  SOLO_ENABLE_MIRROR="true"
+fi
 CLPR_ENABLE_BLOCK_STREAM_TAILER="${CLPR_ENABLE_BLOCK_STREAM_TAILER:-true}"
 export SOLO_ENABLE_BLOCK_NODE
 export SOLO_ENABLE_MIRROR

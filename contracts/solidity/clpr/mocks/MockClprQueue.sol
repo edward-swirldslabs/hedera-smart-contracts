@@ -45,6 +45,9 @@ contract MockClprQueue is IClprQueue {
     /// @dev Keyed by the request message id (`originalMessageId`).
     mapping(uint64 => ClprTypes.ClprMessageResponse) private _pendingResponses;
 
+    /// @notice Middleware endpoint that should receive a pending response.
+    mapping(uint64 => address) private _pendingResponseTarget;
+
     /// @notice Emitted when the mock queue endpoints are configured.
     event EndpointsConfigured(address indexed sourceMiddleware, address indexed destinationMiddleware);
 
@@ -84,7 +87,14 @@ contract MockClprQueue is IClprQueue {
     /// @inheritdoc IClprQueue
     function enqueueMessage(ClprTypes.ClprMessage calldata message) external returns (uint64 messageId) {
         if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
-        if (msg.sender != sourceMiddleware) revert MiddlewareOnly();
+        address targetMiddleware;
+        if (msg.sender == sourceMiddleware) {
+            targetMiddleware = destinationMiddleware;
+        } else if (msg.sender == destinationMiddleware) {
+            targetMiddleware = sourceMiddleware;
+        } else {
+            revert MiddlewareOnly();
+        }
 
         messageId = ++nextMessageId;
         emit MessageEnqueued(
@@ -96,13 +106,18 @@ contract MockClprQueue is IClprQueue {
         );
 
         // Deliver to destination middleware and receive the response envelope.
-        ClprTypes.ClprMessageResponse memory response = IClprMiddleware(destinationMiddleware).handleMessage(
+        ClprTypes.ClprMessageResponse memory response = IClprMiddleware(targetMiddleware).handleMessage(
             message,
             messageId
         );
 
-        // Enqueue response back to the source ledger (but do not deliver synchronously).
-        _storeMessageResponse(response);
+        // Control-plane one-way envelopes do not require response delivery.
+        if (message.applicationMessage.recipientId == address(0)) {
+            return messageId;
+        }
+
+        // Enqueue response back to the sender ledger (but do not deliver synchronously).
+        _storeMessageResponse(response, msg.sender);
     }
 
     /// @inheritdoc IClprQueue
@@ -110,10 +125,14 @@ contract MockClprQueue is IClprQueue {
         ClprTypes.ClprMessageResponse calldata response
     ) external returns (uint64 responseId) {
         if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
-        if (msg.sender != destinationMiddleware) revert MiddlewareOnly();
+        if (msg.sender != sourceMiddleware && msg.sender != destinationMiddleware) revert MiddlewareOnly();
 
         ClprTypes.ClprMessageResponse memory responseCopy = response;
-        responseId = _storeMessageResponse(responseCopy);
+        address target = _pendingResponseTarget[response.originalMessageId];
+        if (target == address(0)) {
+            target = msg.sender == sourceMiddleware ? destinationMiddleware : sourceMiddleware;
+        }
+        responseId = _storeMessageResponse(responseCopy, target);
     }
 
     /// @notice Delivers a previously-enqueued response to the configured source middleware.
@@ -123,11 +142,14 @@ contract MockClprQueue is IClprQueue {
 
         ClprTypes.ClprMessageResponse storage stored = _pendingResponses[originalMessageId];
         if (stored.originalMessageId == 0) revert ResponseNotFound();
+        address targetMiddleware = _pendingResponseTarget[originalMessageId];
+        if (targetMiddleware == address(0)) revert ResponseNotFound();
 
         ClprTypes.ClprMessageResponse memory response = stored;
         delete _pendingResponses[originalMessageId];
+        delete _pendingResponseTarget[originalMessageId];
 
-        IClprMiddleware(sourceMiddleware).handleMessageResponse(response);
+        IClprMiddleware(targetMiddleware).handleMessageResponse(response);
         emit MessageResponseDelivered(originalMessageId);
     }
 
@@ -141,10 +163,15 @@ contract MockClprQueue is IClprQueue {
             if (stored.originalMessageId == 0) {
                 continue;
             }
+            address targetMiddleware = _pendingResponseTarget[messageId];
+            if (targetMiddleware == address(0)) {
+                continue;
+            }
 
             ClprTypes.ClprMessageResponse memory response = stored;
             delete _pendingResponses[messageId];
-            IClprMiddleware(sourceMiddleware).handleMessageResponse(response);
+            delete _pendingResponseTarget[messageId];
+            IClprMiddleware(targetMiddleware).handleMessageResponse(response);
             emit MessageResponseDelivered(messageId);
         }
     }
@@ -159,7 +186,10 @@ contract MockClprQueue is IClprQueue {
         routeData = _pendingResponses[originalMessageId].middlewareResponse.middlewareMessage.data;
     }
 
-    function _storeMessageResponse(ClprTypes.ClprMessageResponse memory response) private returns (uint64 responseId) {
+    function _storeMessageResponse(
+        ClprTypes.ClprMessageResponse memory response,
+        address targetMiddleware
+    ) private returns (uint64 responseId) {
         if (sourceMiddleware == address(0) || destinationMiddleware == address(0)) revert EndpointsNotConfigured();
         if (_pendingResponses[response.originalMessageId].originalMessageId != 0) revert ResponseAlreadyPending();
 
@@ -167,5 +197,6 @@ contract MockClprQueue is IClprQueue {
         emit MessageResponseEnqueued(responseId, response.originalMessageId, response.middlewareResponse.status);
 
         _pendingResponses[response.originalMessageId] = response;
+        _pendingResponseTarget[response.originalMessageId] = targetMiddleware;
     }
 }

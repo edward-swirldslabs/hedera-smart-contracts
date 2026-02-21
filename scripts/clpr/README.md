@@ -2,13 +2,16 @@
 
 This directory contains the operational scripts used to run the two-ledger CLPR native-messaging scenario in SOLO.
 
+Canonical scenario reference:
+- `docs/clpr/NATIVE_MESSAGING_SOLO_SCENARIO_REFERENCE.md`
+
 The scenario validated by these scripts is:
 
 1. Stand up two SOLO ledgers (source + destination).
 2. Exchange `ClprLedgerConfiguration` state proofs once (the allowed CLPR bootstrap kick).
 3. Deploy middleware/apps/connectors on both ledgers.
 4. Send cross-ledger messages through the native CLPR messaging path (`ClprEndpointClient`, no external pump).
-5. Verify connector failover behavior and destination-funds boundary handling.
+5. Verify connector failover behavior, connector2 depletion, connector2 top-off recovery, and connector2 re-depletion.
 6. Optionally tail block-stream frames from block nodes for observability.
 
 ## Directory layout
@@ -39,7 +42,7 @@ The scenario validated by these scripts is:
 - `two-network-down.sh`
   - Stops/destroys both deployments.
 - `run-scenario.js`
-  - Deploys CLPR contracts and executes the connector failover + funds depletion validation logic.
+  - Deploys CLPR contracts and executes the connector failover + depletion/top-off/re-depletion validation logic.
 - `block-stream-tailer.js`
   - Live BN subscriber consumer using `grpcurl`; emits structured NDJSON metadata for CLPR-relevant block items/frames.
 - `config/application-src.properties`
@@ -273,7 +276,11 @@ Optional env:
 Behavior:
 - Deploys middleware/connectors/apps to both ledgers.
 - Configures connector relationships and callback trust.
-- Sends 4 messages and validates connector failover and funds-boundary semantics.
+- Sends 6 messages total:
+  - first 2 use connector2 after connector1 denial,
+  - next 2 pre-reject connector2 and fail over to connector3,
+  - top-off destination connector2, then send 2 more where connector2 succeeds once and is pre-rejected again.
+- Validates funding-state control updates and connector attempt counters.
 - Exits non-zero on assertion failure.
 
 ### `block-stream-tailer.js`
