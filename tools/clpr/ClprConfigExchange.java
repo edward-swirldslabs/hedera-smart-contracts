@@ -67,8 +67,9 @@ public final class ClprConfigExchange {
 
     private record QueryResult(ResponseCodeEnum precheck, StateProof proof) {}
 
+    private static final Duration GRPC_TIMEOUT = Duration.ofSeconds(5);
     private static final PbjGrpcClientConfig QUERY_CLIENT_CONFIG = new PbjGrpcClientConfig(
-            Duration.ofSeconds(1),
+            GRPC_TIMEOUT,
             Tls.builder().enabled(false).build(),
             Optional.empty(),
             ServiceInterface.RequestOptions.APPLICATION_GRPC_PROTO);
@@ -93,6 +94,8 @@ public final class ClprConfigExchange {
             final WebClient webClient = WebClient.builder()
                     .baseUri("http://" + endpoint.host() + ":" + endpoint.port())
                     .tls(Tls.builder().enabled(false).build())
+                    .connectTimeout(GRPC_TIMEOUT)
+                    .readTimeout(GRPC_TIMEOUT)
                     .build();
             pbjGrpcClient = new PbjGrpcClient(webClient, QUERY_CLIENT_CONFIG);
             clprServiceClient = new ClprServiceInterface.ClprServiceClient(pbjGrpcClient, REQUEST_OPTIONS);

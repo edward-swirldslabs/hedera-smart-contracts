@@ -19,7 +19,7 @@ if [[ -n "${CLPR_SOLO_HOME:-}" ]]; then
   export SOLO_HOME="$CLPR_SOLO_HOME"
 fi
 
-SOLO_CLUSTER_CONTEXT="${SOLO_CLUSTER_CONTEXT:-docker-desktop}"
+SOLO_CLUSTER_CONTEXT="${SOLO_CLUSTER_CONTEXT:-$(kubectl config current-context 2>/dev/null || echo docker-desktop)}"
 SOLO_CLUSTER_REF="${SOLO_CLUSTER_REF:-solo-shared}"
 SOLO_CLUSTER_SETUP_NAMESPACE="${SOLO_CLUSTER_SETUP_NAMESPACE:-solo-setup}"
 
@@ -90,6 +90,8 @@ require_prereqs() {
     warn "SOLO_HOME is not set; Solo will use the default (~/.solo). For parallel workstreams, set SOLO_HOME (or CLPR_SOLO_HOME) to a workstream-specific directory."
   fi
   [[ -d "$CN_LOCAL_BUILD_PATH" ]] || die "Consensus local build path not found: $CN_LOCAL_BUILD_PATH"
+  local log4j_path="${CN_LOCAL_BUILD_PATH}/../log4j2.xml"
+  [[ -f "$log4j_path" ]] || warn "log4j2.xml not found at $log4j_path; Solo will use the default (org.hiero.* loggers may be invisible)"
   [[ -f "$SRC_APP_PROPERTIES" ]] || die "Missing source app properties file: $SRC_APP_PROPERTIES"
   [[ -f "$DST_APP_PROPERTIES" ]] || die "Missing destination app properties file: $DST_APP_PROPERTIES"
 }
@@ -122,12 +124,10 @@ MANIFEST
 }
 
 ensure_cluster_ref() {
-  if cluster_ref_exists; then
-    log "Cluster reference already exists: $SOLO_CLUSTER_REF"
-  else
-    log "Connecting cluster reference '$SOLO_CLUSTER_REF' -> context '$SOLO_CLUSTER_CONTEXT'"
-    solo cluster-ref config connect -c "$SOLO_CLUSTER_REF" --context "$SOLO_CLUSTER_CONTEXT" -q
-  fi
+  # Always (re)connect the cluster-ref to the requested context so the mapping
+  # stays correct even when SOLO_HOME was configured against a different cluster.
+  log "Connecting cluster reference '$SOLO_CLUSTER_REF' -> context '$SOLO_CLUSTER_CONTEXT'"
+  solo cluster-ref config connect -c "$SOLO_CLUSTER_REF" --context "$SOLO_CLUSTER_CONTEXT" -q
 
   if [[ "${SOLO_SKIP_CLUSTER_SETUP:-false}" == "true" ]]; then
     warn "Skipping 'solo cluster-ref config setup' because SOLO_SKIP_CLUSTER_SETUP=true (caller is responsible for cluster-scoped setup)."

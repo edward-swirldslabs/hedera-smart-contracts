@@ -1,6 +1,7 @@
 node_modules
 cache
 .idea
+.DS_Store
 
 # ignore non repo contract related aritifacts
 .openzeppelin/unknown-298.json

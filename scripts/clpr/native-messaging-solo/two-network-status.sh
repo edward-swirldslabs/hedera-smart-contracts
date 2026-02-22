@@ -136,8 +136,7 @@ check_namespace_health() {
     else
       log "Block node service present: $block_node_svc"
       if ! kubectl -n "$namespace" get endpoints "$block_node_svc" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -Eq '.'; then
-        warn "Block node service '$block_node_svc' has no ready endpoints in namespace '$namespace'"
-        failures=$((failures + 1))
+        warn "Block node service '$block_node_svc' has no ready endpoints in namespace '$namespace' (non-fatal; block node is optional for CLPR messaging)"
       else
         log "Block node service '$block_node_svc' has ready endpoints"
       fi

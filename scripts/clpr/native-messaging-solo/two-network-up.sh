@@ -234,6 +234,8 @@ setup_deployment() {
   log "Generating consensus keys for '$deployment'"
   solo keys consensus generate -d "$deployment" --gossip-keys --tls-keys -i "$SOLO_NODE_ALIASES" "${DEV_ARGS[@]}" -q
 
+  local log4j_path="${CN_LOCAL_BUILD_PATH}/../log4j2.xml"
+
   local deploy_cmd=(
     solo consensus network deploy
     -d "$deployment"
@@ -243,6 +245,10 @@ setup_deployment() {
     "${DEV_ARGS[@]}"
     -q
   )
+
+  if [[ -f "$log4j_path" ]]; then
+    deploy_cmd+=(--log4j2-xml "$log4j_path")
+  fi
 
   if [[ -n "$SOLO_CONSENSUS_RELEASE_TAG" ]]; then
     deploy_cmd+=(--release-tag "$SOLO_CONSENSUS_RELEASE_TAG")
@@ -324,8 +330,31 @@ setup_deployment() {
   fi
 }
 
+# Solo's haproxy-ingress chart creates cluster-scoped ClusterRole/ClusterRoleBinding resources
+# annotated with a specific namespace. Stale resources from a previous run can block the current
+# deployment. Clean up any pre-existing resources before deploying either network.
+if kubectl get clusterrole mirror-ingress-controller >/dev/null 2>&1; then
+  log "Deleting stale haproxy-ingress ClusterRole/ClusterRoleBinding from previous run"
+  kubectl delete clusterrole mirror-ingress-controller 2>/dev/null || true
+  kubectl delete clusterrolebinding mirror-ingress-controller 2>/dev/null || true
+fi
+
 setup_deployment "$SOLO_SRC_DEPLOYMENT" "$SOLO_SRC_NAMESPACE" "$SRC_APP_PROPERTIES"
+
+# Re-label the ClusterRole created by the SRC mirror to the DST namespace so the DST deployment
+# can install the same chart without a Helm ownership conflict.
+if kubectl get clusterrole mirror-ingress-controller >/dev/null 2>&1; then
+  log "Re-labelling haproxy-ingress ClusterRole for destination namespace"
+  kubectl annotate clusterrole mirror-ingress-controller \
+    meta.helm.sh/release-namespace="$SOLO_DST_NAMESPACE" --overwrite 2>/dev/null || true
+  kubectl annotate clusterrolebinding mirror-ingress-controller \
+    meta.helm.sh/release-namespace="$SOLO_DST_NAMESPACE" --overwrite 2>/dev/null || true
+fi
+
 setup_deployment "$SOLO_DST_DEPLOYMENT" "$SOLO_DST_NAMESPACE" "$DST_APP_PROPERTIES"
+
+# Solo CLI operations may unset or change the kubectl context; restore it before health checks.
+kubectl config use-context "$SOLO_CLUSTER_CONTEXT" >/dev/null 2>&1 || true
 
 log "Running health checks"
 "$SCRIPT_DIR/two-network-status.sh"

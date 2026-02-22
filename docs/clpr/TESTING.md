@@ -301,6 +301,20 @@ Key overrides for `run-e2e.sh`:
 
 Full environment variable reference: `scripts/clpr/README.md`
 
+### Manual Phase-by-Phase Usage
+
+`run-e2e.sh` orchestrates everything automatically. For manual control of individual phases, the following scripts can be run independently:
+
+| Script | Purpose |
+|---|---|
+| `two-network-up.sh [--force]` | Create and start both Solo deployments (source + destination) with optional mirror/relay/block-node components |
+| `two-network-status.sh` | Health/status checks for both deployments (namespace/pod/service health, CLPR properties enabled) |
+| `two-network-down.sh [--keep-config]` | Stop/destroy both deployments and optional components |
+| `run-e2e-phases.sh` | Sourced helper defining orchestration phase functions (not executed directly) |
+| `lib.sh` | Sourced shared shell library with env defaults, prereq checks, helper functions (not executed directly) |
+
+The manual phase-by-phase walkthrough (bring up → health check → port-forward → config exchange → scenario → tailers → teardown) is documented in detail in [`scripts/clpr/README.md`](../../scripts/clpr/README.md#manual-phase-by-phase-usage-all-scripts).
+
 ### Expected Run Time
 
 - Full clean run (build + deploy + scenario + teardown): ~10-15 minutes

@@ -179,10 +179,10 @@ collect_output_logs() {
   kubectl -n "$namespace" exec "$pod" -c root-container -- sh -lc 'ls -la /opt/hgcapp/services-hedera/HapiApp2.0/output || true' \
     >"$RUN_DIR/output-dir-${label}.txt" 2>&1 || true
 
-  kubectl -n "$namespace" exec "$pod" -c root-container -- sh -lc 'tail -n 2000 /opt/hgcapp/services-hedera/HapiApp2.0/output/hgcaa.log || true' \
+  kubectl -n "$namespace" exec "$pod" -c root-container -- sh -lc 'tail -n 50000 /opt/hgcapp/services-hedera/HapiApp2.0/output/hgcaa.log || true' \
     >"$RUN_DIR/hgcaa-${label}.log" 2>&1 || true
 
-  kubectl -n "$namespace" exec "$pod" -c root-container -- sh -lc 'tail -n 2000 /opt/hgcapp/services-hedera/HapiApp2.0/output/swirlds.log || true' \
+  kubectl -n "$namespace" exec "$pod" -c root-container -- sh -lc 'tail -n 50000 /opt/hgcapp/services-hedera/HapiApp2.0/output/swirlds.log || true' \
     >"$RUN_DIR/swirlds-${label}.log" 2>&1 || true
 }
 
@@ -190,6 +190,9 @@ collect_evidence() {
   if [[ "$EVIDENCE_COLLECTED" == "true" ]]; then
     return 0
   fi
+
+  # Solo CLI operations may unset or change the kubectl context; restore it.
+  kubectl config use-context "$SOLO_CLUSTER_CONTEXT" >/dev/null 2>&1 || true
 
   log "Collecting evidence (best-effort)"
 
@@ -262,6 +265,9 @@ log "Run directory: $RUN_DIR"
 
 phase_build_consensus_artifacts
 phase_prepare_cluster_and_networks
+
+# Solo CLI operations may unset or change the kubectl context; restore it.
+kubectl config use-context "$SOLO_CLUSTER_CONTEXT" >/dev/null 2>&1 || true
 
 log "Starting gRPC port-forwards"
 SRC_POD="$(find_node_pod "$SOLO_SRC_NAMESPACE")"
