@@ -199,6 +199,16 @@ contract MockClprConnector is IClprConnector, ClprFundingAwareConnectorBase {
         });
     }
 
+    /// @notice Returns current connector available balance in local units.
+    function availableBalance() external view returns (uint256 balance) {
+        balance = _availableBalance();
+    }
+
+    /// @notice Returns current connector safety threshold in local units.
+    function safetyThreshold() external view returns (uint256 threshold) {
+        threshold = _safetyThreshold;
+    }
+
     /// @inheritdoc IClprConnector
     function minimumCharge() external view override returns (ClprTypes.ClprAmount memory amount) {
         amount = ClprTypes.ClprAmount({value: _minimumCharge, unit: _localUnit});

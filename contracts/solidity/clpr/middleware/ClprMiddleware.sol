@@ -218,6 +218,13 @@ contract ClprMiddleware is IClprMiddleware {
         bytes32 destinationConnectorId
     );
 
+    /// @notice Emitted when a response arrives for a control message (or other non-pending message id).
+    event ControlResponseObserved(
+        uint64 indexed messageId,
+        ClprTypes.ClprMiddlewareStatus status,
+        bytes32 indexed connectorId
+    );
+
     /// @param queueAddress Queue contract used for enqueue and for message delivery callbacks.
     /// @param ledgerId_ Opaque ledger id used for connector identity configuration (spec alignment).
     constructor(address queueAddress, bytes32 ledgerId_) {
@@ -585,7 +592,14 @@ contract ClprMiddleware is IClprMiddleware {
         // Control message replies and re-deliveries have no pending application entry; return without reverting.
         // The native ClprEndpointClient delivers replies for all message types, including control envelopes.
         // MockClprQueue skips response delivery for control messages entirely, so only SOLO hits this path.
-        if (!pending.exists) return;
+        if (!pending.exists) {
+            emit ControlResponseObserved(
+                response.originalMessageId,
+                response.middlewareResponse.status,
+                response.middlewareResponse.middlewareMessage.balanceReport.connectorId
+            );
+            return;
+        }
         if (!localApplications[pending.sourceApplication]) revert ApplicationNotRegistered();
 
         delete pendingByMessageId[response.originalMessageId];
