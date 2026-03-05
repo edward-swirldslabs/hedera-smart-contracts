@@ -49,6 +49,27 @@ This project is set up using the Hardhat development environment. To get started
 
 For using this project as a library in a Foundry project see [Foundry Testing](FOUNDRY_TESTING.md)
 
+## CLPR Middleware
+
+This repository includes the CLPR (Cross-Ledger Protocol Relay) Solidity middleware with native messaging integration validated end-to-end across two Solo ledgers.
+
+Source code: `contracts/solidity/clpr/` | Documentation: `docs/clpr/README.md`
+
+### CLPR tests
+
+```bash
+# Hardhat (single-ledger)
+npx hardhat test test/solidity/clpr/clprMiddleware.js --network hardhat
+
+# Foundry (single-ledger)
+forge test --match-path test/foundry/ClprMiddleware.t.sol
+
+# Two-Solo E2E (native messaging, no external pump)
+bash scripts/clpr/native-messaging-solo/run-e2e.sh
+```
+
+See `docs/clpr/TESTING.md` for prerequisites, step-by-step setup, and troubleshooting.
+
 ## Support
 
 If you have a question on how to use the product, please see our
